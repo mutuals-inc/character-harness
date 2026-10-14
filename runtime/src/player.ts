@@ -10,7 +10,7 @@
 // output goes to .cache/player.log; closing the player stops the runtime, and
 // stopping the runtime closes the player.
 
-import { spawn, spawnSync } from "node:child_process";
+import { spawn, spawnSync, type ChildProcess } from "node:child_process";
 import { closeSync, mkdirSync, openSync } from "node:fs";
 import path from "node:path";
 
@@ -40,21 +40,25 @@ export function startPlayer(
 	onExit: (code: number | null, signal: NodeJS.Signals | null) => void,
 ): () => void {
 	mkdirSync(path.dirname(LOG), { recursive: true });
+	// Windows environment names are case-insensitive.
+	const windows = process.platform === "win32";
+	const keyName = (name: string) => windows ? name.toLowerCase() : name;
+	const secretNames = new Set([...secrets].map(keyName));
+	const env = Object.fromEntries(Object.entries(process.env).filter(([k]) => !secretNames.has(keyName(k))));
 	const log = openSync(LOG, "w");
-	const secretNames = new Set([...secrets].map((k) => process.platform === "win32" ? k.toLowerCase() : k));
-	const child = spawn(command, {
-		shell: true,
-		env: {
-			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !secretNames.has(process.platform === "win32" ? k.toLowerCase() : k))),
-			HARNESS_URL: launch.url,
-			HARNESS_CHARACTER: launch.character,
-		},
-		stdio: ["ignore", log, log],
-		// its own process group, so stopping it reaches whatever the command starts
-		detached: true,
-		windowsHide: true,
-	});
-	closeSync(log);
+	let child: ChildProcess;
+	try {
+		child = spawn(command, {
+			shell: true,
+			env: { ...env, HARNESS_URL: launch.url, HARNESS_CHARACTER: launch.character },
+			stdio: ["ignore", log, log],
+			// its own process group, so stopping it reaches whatever the command starts
+			detached: true,
+			windowsHide: true,
+		});
+	} finally {
+		closeSync(log);
+	}
 	let exited = false;
 	child.on("exit", (code, signal) => {
 		exited = true;
@@ -69,7 +73,7 @@ export function startPlayer(
 	return () => {
 		if (exited || !child.pid) return;
 		try {
-			if (process.platform === "win32") {
+			if (windows) {
 				// exit handlers cannot wait for asynchronous process-tree cleanup.
 				spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
 			} else {

@@ -6,28 +6,49 @@ Builds will be attached to this repo's GitHub Releases; using one needs no Kaige
 
 ## Build
 
-For PowerShell setup, build commands and the test handoff, see
-[`docs/windows.md`](../docs/windows.md).
-
 1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt`.
 2. Link this folder to the engine you installed (git ignores the link):
+
+   macOS:
 
    ```bash
    ln -s "$HOME/Library/Application Support/hz/engines/<engine-version>" hz
    ```
 
+   Windows (PowerShell):
+
+   ```powershell
+   New-Item -ItemType Junction -Path hz -Target "$env:LOCALAPPDATA\hz\engines\<engine-version>"
+   ```
+
 3. Build and run:
+
+   macOS:
 
    ```bash
    hz/hzbuild macos run
    ```
 
-   The first build cooks the assets, which takes about half a minute. On macOS, allow microphone access for the app you start it from (System Settings > Privacy & Security > Microphone).
+   Windows (PowerShell):
 
-To have the runtime's `npm start` open it, put this in the harness's `.env`:
+   ```powershell
+   .\hz\hzbuild.exe windows run
+   ```
+
+   The first build cooks the assets, which takes about half a minute. On macOS, allow microphone access for the app you start it from (System Settings > Privacy & Security > Microphone). On Windows, allow desktop apps to access the microphone in Settings > Privacy & security > Microphone.
+
+To have the runtime's `npm start` open it, set `HARNESS_PLAYER` in the harness's `.env`:
+
+macOS:
 
 ```
 HARNESS_PLAYER="cd player && hz/hzbuild macos run"
+```
+
+On Windows:
+
+```
+HARNESS_PLAYER="cd player && hz\hzbuild.exe windows run"
 ```
 
 ## Settings

@@ -1,10 +1,30 @@
+// Player launch settings, credential isolation and process-tree cleanup. No network.
+
 import assert from "node:assert/strict";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
 import { manualStart, startPlayer } from "../src/player.ts";
+
+async function waitFor(check: () => boolean, message: string): Promise<void> {
+	const deadline = Date.now() + 5000;
+	while (!check()) {
+		assert.ok(Date.now() < deadline, message);
+		await delay(50);
+	}
+}
+
+function running(pid: number): boolean {
+	try {
+		process.kill(pid, 0);
+		return true;
+	} catch (e) {
+		if ((e as NodeJS.ErrnoException).code === "ESRCH") return false;
+		throw e;
+	}
+}
 
 test("manual player settings can be pasted into PowerShell, including quotes in model paths", () => {
 	assert.equal(manualStart({ url: "ws://127.0.0.1/session/token", character: "C:\\a b\\Fox's model.vrm" }, "win32"),
@@ -33,24 +53,14 @@ setInterval(() => {}, 1000);
 	const stop = startPlayer(`"${process.execPath}" "${script}"`, launch,
 		new Set([process.platform === "win32" ? keyName.toLowerCase() : keyName]), () => { ended = true; });
 	try {
-		let started: { pid: number; child: number; secretPresent: boolean; url: string; character: string } | undefined;
-		for (let i = 0; i < 100 && !started; i++) {
-			try { started = JSON.parse(readFileSync(marker, "utf8")); } catch { await delay(50); }
-		}
-		assert.ok(started, "player command started");
+		await waitFor(() => existsSync(marker), "player command started");
+		const started = JSON.parse(readFileSync(marker, "utf8"));
 		assert.equal(started.secretPresent, false);
 		assert.equal(started.url, launch.url);
 		assert.equal(started.character, launch.character);
 		stop();
-		for (let i = 0; i < 100 && !ended; i++) await delay(50);
-		assert.ok(ended, "player command exits after stop");
-		for (const pid of [started.pid, started.child]) {
-			let alive = true;
-			for (let i = 0; i < 100 && alive; i++) {
-				try { process.kill(pid, 0); await delay(50); } catch { alive = false; }
-			}
-			assert.equal(alive, false, `process ${pid} stopped`);
-		}
+		await waitFor(() => ended, "player command exits after stop");
+		await waitFor(() => !running(started.pid) && !running(started.child), "player and its child stopped");
 		stop(); // cleanup is safe after the command has exited
 	} finally {
 		stop();

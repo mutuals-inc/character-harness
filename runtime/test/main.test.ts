@@ -1,13 +1,14 @@
+// Runtime startup with settings from .env. Uses only a local HTTP connection.
+
 import assert from "node:assert/strict";
 import { spawn } from "node:child_process";
 import { once } from "node:events";
-import { mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
+import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { createServer } from "node:net";
 import { tmpdir } from "node:os";
 import path from "node:path";
-import test from "node:test";
+import { test } from "node:test";
 import { setTimeout as delay } from "node:timers/promises";
-import YAML from "yaml";
 
 test("runtime reads HOST and PORT from the character's env file", { timeout: 10000 }, async () => {
 	const probe = createServer();
@@ -19,14 +20,23 @@ test("runtime reads HOST and PORT from the character's env file", { timeout: 100
 	await new Promise<void>((resolve, reject) => probe.close((error) => error ? reject(error) : resolve()));
 	const root = path.resolve(import.meta.dirname, "../..");
 	const dir = mkdtempSync(path.join(tmpdir(), "harness-startup-"));
-	const manifest = YAML.parse(readFileSync(path.join(root, "characters/foxglove/character.yaml"), "utf8"));
-	manifest.id = "startup-test";
-	manifest.name = "Startup test";
-	manifest.prompt = path.join(root, "characters/foxglove/system.md");
-	manifest.models.chat.api_key_env = "STARTUP_TEST_KEY";
-	manifest.env_file = ".env";
-	manifest.extensions = [];
-	writeFileSync(path.join(dir, "character.yaml"), YAML.stringify(manifest));
+	writeFileSync(path.join(dir, "system.md"), "You are a test.");
+	writeFileSync(path.join(dir, "character.yaml"), `schema: 1
+id: startup-test
+name: Startup test
+description: A character for the tests.
+author: tests
+license: none
+prompt: system.md
+models:
+  chat: { api: chat_completions, base_url: "https://example.invalid/v1", api_key_env: STARTUP_TEST_KEY, model: m }
+stt: { provider: elevenlabs, model: scribe_v2_realtime }
+voice: { provider: elevenlabs, voice_id: v, model: eleven_v4_turbo }
+rig: { profile: test, engine: ">=0.5.8" }
+emotions: test
+extensions: []
+env_file: .env
+`);
 	writeFileSync(path.join(dir, ".env"), `HOST=127.0.0.1\nPORT=${port}\nSTARTUP_TEST_KEY=test-only\nELEVENLABS_API_KEY=test-only\n`);
 	const env: NodeJS.ProcessEnv = { ...process.env, HARNESS_PLAYER: "" };
 	delete env.HOST;

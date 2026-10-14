@@ -38,7 +38,6 @@ Needs Node 23.6 or later, an ElevenLabs key and a key for the chat model the cha
 - `docs/extensions.md`: how to write an extension
 - `docs/protocol.md`: the messages between the player app and the runtime
 - `docs/bring-your-own-character.md`: use your own VRM model and animations
-- `docs/windows.md`: Windows setup, builds and the test handoff
 
 ## Contributing
 
