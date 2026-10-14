@@ -6,6 +6,9 @@ Builds will be attached to this repo's GitHub Releases; using one needs no Kaige
 
 ## Build
 
+For PowerShell setup, build commands and the test handoff, see
+[`docs/windows.md`](../docs/windows.md).
+
 1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt`.
 2. Link this folder to the engine you installed (git ignores the link):
 

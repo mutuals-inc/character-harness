@@ -10,8 +10,8 @@
 // output goes to .cache/player.log; closing the player stops the runtime, and
 // stopping the runtime closes the player.
 
-import { spawn } from "node:child_process";
-import { mkdirSync, openSync } from "node:fs";
+import { spawn, spawnSync } from "node:child_process";
+import { closeSync, mkdirSync, openSync } from "node:fs";
 import path from "node:path";
 
 const LOG = path.resolve(import.meta.dirname, "../../.cache/player.log");
@@ -24,7 +24,11 @@ export interface PlayerLaunch {
 }
 
 // what to give the player when starting it by hand, for the console
-export function manualStart(launch: PlayerLaunch): string {
+export function manualStart(launch: PlayerLaunch, platform = process.platform): string {
+	if (platform === "win32") {
+		const quote = (value: string) => `'${value.replaceAll("'", "''")}'`;
+		return `$env:HARNESS_URL=${quote(launch.url)}; $env:HARNESS_CHARACTER=${quote(launch.character)}`;
+	}
 	return `HARNESS_URL=${launch.url} HARNESS_CHARACTER=${JSON.stringify(launch.character)}`;
 }
 
@@ -37,26 +41,40 @@ export function startPlayer(
 ): () => void {
 	mkdirSync(path.dirname(LOG), { recursive: true });
 	const log = openSync(LOG, "w");
+	const secretNames = new Set([...secrets].map((k) => process.platform === "win32" ? k.toLowerCase() : k));
 	const child = spawn(command, {
 		shell: true,
 		env: {
-			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !secrets.has(k))),
+			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !secretNames.has(process.platform === "win32" ? k.toLowerCase() : k))),
 			HARNESS_URL: launch.url,
 			HARNESS_CHARACTER: launch.character,
 		},
 		stdio: ["ignore", log, log],
 		// its own process group, so stopping it reaches whatever the command starts
 		detached: true,
+		windowsHide: true,
 	});
-	child.on("exit", (code, signal) => onExit(code, signal));
+	closeSync(log);
+	let exited = false;
+	child.on("exit", (code, signal) => {
+		exited = true;
+		onExit(code, signal);
+	});
 	child.on("error", (e) => {
+		exited = true;
 		console.error(`could not start the player: ${e.message}`);
 		onExit(1, null);
 	});
 	console.log(`player starting (log: ${playerLog})`);
 	return () => {
+		if (exited || !child.pid) return;
 		try {
-			if (child.pid) process.kill(-child.pid, "SIGTERM");
+			if (process.platform === "win32") {
+				// exit handlers cannot wait for asynchronous process-tree cleanup.
+				spawnSync("taskkill", ["/pid", String(child.pid), "/t", "/f"], { stdio: "ignore", windowsHide: true });
+			} else {
+				process.kill(-child.pid, "SIGTERM");
+			}
 		} catch {
 			// already gone
 		}

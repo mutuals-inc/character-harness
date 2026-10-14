@@ -28,8 +28,6 @@ function fail(message: string): never {
 }
 
 const dir = path.resolve(process.argv[2] ?? "characters/foxglove");
-const host = process.env.HOST ?? "127.0.0.1";
-const port = Number(process.env.PORT ?? 8788);
 // the largest message the app sends is an `llm` with the whole conversation
 const MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
 
@@ -43,6 +41,8 @@ try {
 if (!existsSync(character.env_file))
 	fail(`${character.env_file} does not exist. Copy .env.example to .env and fill in the keys.`);
 process.loadEnvFile(character.env_file);
+const host = process.env.HOST ?? "127.0.0.1";
+const port = Number(process.env.PORT ?? 8788);
 const missing = requiredKeys(character).filter((k) => !process.env[k]);
 // what the player must not inherit: every key the character names, and
 // everything .env sets except the player's own HARNESS_* settings
