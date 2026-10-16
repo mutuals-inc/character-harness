@@ -76,15 +76,26 @@ try {
     if ($versionPattern.Matches($projectText).Count -ne 1) { throw 'hzproject.hzt: expected one publish version line.' }
     $engineMatch = [regex]::Match($projectText, '(?m)^engine_version ([^\r\n]+)')
     $engineVersion = $engineMatch.Groups[1].Value
+    $previousCompilerOptions = [Environment]::GetEnvironmentVariable('_CL_', 'Process')
     try {
         $releaseProject = $versionPattern.Replace($projectText, "`${1}$version")
         [IO.File]::WriteAllText($projectPath, $releaseProject, [Text.UTF8Encoding]::new($false))
         # Imported personal models and stale publish files must not ship.
         Remove-PlayerOutput 'cooked\vrm'
         Remove-PlayerOutput 'out\windows\publish'
+        $null = New-Item -ItemType Directory -Path 'out\windows\compiler' -Force
+        # _CL_ appends MSVC options; keep compiler PDBs out of the project root.
+        [Environment]::SetEnvironmentVariable('_CL_',
+            ($previousCompilerOptions + ' /Fd"out\windows\compiler\vc.pdb"').Trim(), 'Process')
         Invoke-Checked $builder @('windows', 'publish')
     }
     finally {
+        if ($null -eq $previousCompilerOptions) {
+            [Environment]::SetEnvironmentVariable('_CL_', [NullString]::Value, 'Process')
+        }
+        else {
+            [Environment]::SetEnvironmentVariable('_CL_', $previousCompilerOptions, 'Process')
+        }
         [IO.File]::WriteAllBytes($projectPath, $projectBytes)
     }
 
