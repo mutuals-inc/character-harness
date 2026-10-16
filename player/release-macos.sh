@@ -99,6 +99,9 @@ if [ ${#apps[@]} -ne 1 ] || [ ! -d "${apps[0]}" ]; then
 	exit 1
 fi
 app="${apps[0]}"
+mkdir -p "$app/Contents/Resources"
+cp "$repo_root/LICENSE" "$app/Contents/Resources/LICENSE.txt"
+cp "$repo_root/NOTICE" "$app/Contents/Resources/NOTICE.txt"
 name="$(basename "$app" .app)"
 out="out/release"
 rm -rf "$out"

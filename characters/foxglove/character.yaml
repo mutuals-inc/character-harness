@@ -4,7 +4,7 @@ id: foxglove
 name: FoxGlove
 description: A three-week-old virtual popstar who is loud, proud, and a little afraid of being forgotten.
 author: Mutuals
-license: MIT
+license: Apache-2.0
 
 prompt: system.md
 

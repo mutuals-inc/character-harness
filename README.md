@@ -52,4 +52,4 @@ Issues and pull requests are welcome; see `CONTRIBUTING.md`. To report a securit
 
 ## License
 
-MIT, see `LICENSE`. That covers FoxGlove too: her character (`characters/foxglove/`) and her model and art (`player/assets/foxglove/`). Included third-party work keeps its own licence: the Silero VAD model (MIT, `player/assets/vad/LICENSE`) and the MToon shading the player's shaders follow (MIT, credited in their headers). The Kaigen engine is not part of this repo.
+Apache License 2.0, see `LICENSE` and `NOTICE`. That covers FoxGlove too: her character (`characters/foxglove/`) and her model and art (`player/assets/foxglove/`). Included third-party work keeps its own licence: the Silero VAD model (MIT, `player/assets/vad/LICENSE`) and the MToon shading the player's shaders follow (MIT, credited in their headers). The Kaigen engine is not part of this repo.

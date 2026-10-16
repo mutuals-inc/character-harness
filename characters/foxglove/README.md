@@ -6,4 +6,4 @@ Her animations are in `animations/`, as VRM Animation (`.vrma`) files that fit a
 
 Files: `character.yaml`, `system.md`, `director.yaml`, `animations/`.
 
-FoxGlove is Mutuals' own character. Her model, textures and animations are under the repository's MIT licence, like the code.
+FoxGlove is Mutuals' own character. Her model, textures and animations are under the repository's Apache License 2.0, like the code.

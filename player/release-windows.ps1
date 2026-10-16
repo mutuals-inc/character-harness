@@ -130,6 +130,7 @@ try {
         }
     }
     Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $stage 'LICENSE.txt')
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'NOTICE') -Destination (Join-Path $stage 'NOTICE.txt')
     Copy-Item -LiteralPath 'assets\vad\LICENSE' -Destination (Join-Path $stage 'LICENSE-silero-vad.txt')
     $readme = @"
 Character Player $version - Windows x64
