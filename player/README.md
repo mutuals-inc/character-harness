@@ -178,8 +178,7 @@ player/out/release/windows-x64/
 During the release build, MSVC's compiler PDB is directed to
 `out/windows/compiler/vc.pdb` using `/Fd`. The script preserves existing
 compiler environment options and restores them after success or failure.
-Direct `hzbuild` calls still use the SDK's default PDB location; the
-`/vc*.pdb` ignore rule remains a safeguard for those builds.
+Direct `hzbuild` calls still use the SDK's default PDB location.
 
 The `.exe` release asset is the native player application, also included inside
 the ZIP. It needs any published runtime files beside it; it is not a
