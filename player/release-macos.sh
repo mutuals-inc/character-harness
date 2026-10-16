@@ -4,7 +4,7 @@
 #
 #   MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" \
 #   MACOS_NOTARY_PROFILE=<profile> \
-#   player/release-macos.sh v0.1.0 [--no-release]
+#   player/release-macos.sh v0.1.0-macos-arm64 [--no-release]
 #
 # or, with neither set, unsigned: signed ad hoc and not notarized, so macOS
 # asks people to allow it on its first start (player/README.md says how).
@@ -17,7 +17,7 @@
 # - gh, signed in with access to the repo
 #
 # The tag must be checked out with a clean tree and pushed. The version comes
-# from the tag (v0.1.0 -> 0.1.0). --no-release builds and signs (and
+# from the tag (v0.1.0-macos-arm64 -> 0.1.0). --no-release builds and signs (and
 # notarizes, if signed) but leaves the files in player/out/release/ without
 # creating the release.
 #
@@ -31,10 +31,10 @@ create_release=true
 case "$#:${2:-}" in
 	1:) ;;
 	2:--no-release) create_release=false ;;
-	*) echo "usage: $0 vMAJOR.MINOR.PATCH [--no-release]" >&2; exit 1 ;;
+	*) echo "usage: $0 vMAJOR.MINOR.PATCH-macos-arm64 [--no-release]" >&2; exit 1 ;;
 esac
-if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)$ ]]; then
-	echo "usage: $0 vMAJOR.MINOR.PATCH [--no-release]" >&2
+if [[ ! "$tag" =~ ^v([0-9]+\.[0-9]+\.[0-9]+)-macos-arm64$ ]]; then
+	echo "usage: $0 vMAJOR.MINOR.PATCH-macos-arm64 [--no-release]" >&2
 	exit 1
 fi
 version="${BASH_REMATCH[1]}"
@@ -176,5 +176,5 @@ SHA-256:
 $(cat "$out/SHA256SUMS")
 \`\`\`
 EOF
-gh release create "$tag" --draft --verify-tag --title "$tag" --notes-file "$notes" "$dmg" "$zip" "$out/SHA256SUMS"
+gh release create "$tag" --draft --verify-tag --title "v$version - macOS Apple Silicon" --notes-file "$notes" "$dmg" "$zip" "$out/SHA256SUMS"
 echo "draft release $tag created; review it on GitHub and publish it"

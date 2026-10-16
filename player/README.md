@@ -160,29 +160,57 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `assets/vad/` | the voice activity model ([Silero VAD](https://github.com/snakers4/silero-vad), MIT licence) |
 | `shaders/mutuals/` | the toon and outline shaders |
 
+## Release tags and download links
+
+Use one tag and GitHub release per version, OS and architecture:
+`v0.1.0-windows-x64` and `v0.1.0-macos-arm64` can both release app version
+`0.1.0`, independently and from different commits. Reserve
+`v0.1.0-linux-x64` for a future Linux build; there is no Linux player release
+script yet. The platform suffix is omitted from the app's product version.
+
+Create and push the tag on the commit you will build, then check it out before
+running the platform's release script. For example:
+
+```powershell
+git tag v0.1.0-windows-x64
+git push origin v0.1.0-windows-x64
+git switch --detach v0.1.0-windows-x64
+```
+
+After publishing, the `Update player download links` GitHub Actions workflow
+updates only the marked downloads block in the root README on the default
+branch. It selects the highest published numeric version per platform,
+includes pre-releases and excludes drafts. Editing, deleting or unpublishing
+a release refreshes the links too. You can also run it manually from Actions
+→ Update player download links → Run workflow, for example after merging this
+workflow for the first time. It needs permission to push README updates to
+the default branch; future branch protection must allow those bot commits.
+GitHub's generic `/releases/latest` link excludes pre-releases and does not
+select a platform, so the README links directly to the selected tags.
+
 ## Releasing (macOS)
 
-From a clean checkout of a `vX.Y.Z` tag pushed to GitHub, on a Mac with your Kaigen licence activated:
+From a clean checkout of a `vX.Y.Z-macos-arm64` tag pushed to GitHub, on a Mac with your Kaigen licence activated:
 
 ```bash
-player/release-macos.sh vX.Y.Z
+player/release-macos.sh vX.Y.Z-macos-arm64
 ```
 
 It builds the app with the engine's publish build, signs it ad hoc with the microphone entitlement (`macos.entitlements`), packages the `.zip` and `.dmg`, writes `SHA256SUMS`, and creates a draft release with them. Gatekeeper treats such a build as unsigned, so people allow it on its first start (see "Install a release"). With both a Developer ID Application certificate (`MACOS_SIGNING_IDENTITY`) and a notarytool keychain profile (`MACOS_NOTARY_PROFILE`) set, it signs and notarizes it instead, and it opens with no warning; set both or neither:
 
 ```bash
-MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" MACOS_NOTARY_PROFILE=<profile> player/release-macos.sh vX.Y.Z
+MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" MACOS_NOTARY_PROFILE=<profile> player/release-macos.sh vX.Y.Z-macos-arm64
 ```
 
 Either way, review the draft and publish it. CI doesn't build the player, so releases are made this way.
 
 ## Releasing (Windows)
 
-From a clean checkout of a `vX.Y.Z` tag, on Windows with the Kaigen SDK linked at
+From a clean checkout of a `vX.Y.Z-windows-x64` tag, on Windows with the Kaigen SDK linked at
 `player/hz`, an activated licence and the native toolchain installed:
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0 -NoRelease
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease
 ```
 
 The script temporarily sets the product version from the tag, removes cached
@@ -218,19 +246,19 @@ source, configure their own keys and run `npm start` as described above.
 For a local preview of uncommitted work, without creating a tag or uploading:
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease -AllowDirty
 ```
 
 To attach the ZIP and checksums to a draft GitHub release, push the tag and run
 without `-NoRelease` (requires `gh` installed and authenticated):
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0
+.\player\release-windows.ps1 v0.1.0-windows-x64
 ```
 
-If a macOS draft already exists for the tag, the Windows assets are added to
-it without replacing its notes or checksums. Existing assets are not silently
-overwritten, and public releases are not modified. Review the draft before
+Each platform has its own tag and release. If a Windows draft already exists
+for this tag, missing assets are added without replacing its notes or checksums.
+Existing assets are not silently overwritten, and public releases are not modified. Review the draft before
 publishing. Artifacts stay under the platform-specific output directory so
 this script does not delete macOS packages.
 

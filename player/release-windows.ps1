@@ -3,16 +3,16 @@
 .SYNOPSIS
 Build the Windows player and attach its portable ZIP and checksums to a draft GitHub release.
 .EXAMPLE
-.\player\release-windows.ps1 v0.1.0 -NoRelease
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease
 .EXAMPLE
-.\player\release-windows.ps1 v0.1.0
+.\player\release-windows.ps1 v0.1.0-windows-x64
 .EXAMPLE
-.\player\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease -AllowDirty
 #>
 [CmdletBinding()]
 param(
     [Parameter(Mandatory = $true, Position = 0)]
-    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')]
+    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+-windows-x64$')]
     [string] $Tag,
     [switch] $NoRelease,
     # Local previews only: package the working tree without requiring a tag.
@@ -71,7 +71,7 @@ try {
     $projectPath = Join-Path $PSScriptRoot 'hzproject.hzt'
     $projectBytes = [IO.File]::ReadAllBytes($projectPath)
     $projectText = [IO.File]::ReadAllText($projectPath)
-    $version = $Tag.Substring(1)
+    $version = $Tag.Substring(1) -replace '-windows-x64$', ''
     $versionPattern = [regex]::new('(?m)^(  version )[^\r\n]*')
     if ($versionPattern.Matches($projectText).Count -ne 1) { throw 'hzproject.hzt: expected one publish version line.' }
     $engineMatch = [regex]::Match($projectText, '(?m)^engine_version ([^\r\n]+)')
@@ -140,14 +140,14 @@ This is the player, not the Node conversation runtime. No Kaigen installation
 or licence is needed to run it.
 
 From a matching character-harness source checkout:
-  npm install
+  npm.cmd ci --omit=dev
   Copy-Item .env.example .env
 
 Add your XAI_API_KEY and ELEVENLABS_API_KEY to .env, then set:
   HARNESS_PLAYER='"C:/path/to/$packageName/$($exe.Name)"'
 
 From the harness root run:
-  npm start
+  npm.cmd start
 
 Allow microphone access for desktop apps in Windows Settings and speak first.
 This build is unsigned; Windows may show a publisher warning.
@@ -167,9 +167,45 @@ Built from $Tag ($commit), Kaigen $engineVersion.
     if ($NoRelease) { Write-Host 'Local build complete; no GitHub release created.'; return }
 
     $notes = Join-Path $output 'notes.md'
-    $releaseNotes = "Windows x64 player, unsigned. Extract the complete ZIP; it contains $($exe.Name) and its runtime files. Keep the extracted folder together. No Kaigen installation is required. See player/README.md for connecting the Node harness.`n`nBuilt from $Tag ($commit), Kaigen $engineVersion.`n`nSHA-256:`n$($sumLines -join "`n")`n"
+    $sourceUrl = "https://github.com/mutuals-inc/character-harness/blob/$Tag"
+    $releaseNotes = @"
+Windows x64 player v$version (unsigned). Download and extract **$packageName.zip**.
+Keep its executable, cooked assets and any DLLs together. The compiled engine
+and FoxGlove model and animations are included; no Kaigen installation or licence is required.
+
+### Run the full harness
+
+1. Install Node.js 24 or later and download this tag's **Source code (zip)**.
+2. Extract the source, open PowerShell in its root (beside package.json), and run ``npm.cmd ci --omit=dev``.
+3. Copy ``.env.example`` to ``.env`` and add your own ``XAI_API_KEY`` and ``ELEVENLABS_API_KEY``.
+4. Set ``HARNESS_PLAYER`` in ``.env`` to the extracted player's path, preserving both quote levels:
+
+``````dotenv
+HARNESS_PLAYER='"C:/Users/you/Apps/$packageName/$($exe.Name)"'
+``````
+
+5. Run ``npm.cmd run check -- characters/foxglove``, then ``npm.cmd start`` from the harness root.
+   The runtime opens the player automatically. Allow desktop microphone access in Windows Settings and **speak first**.
+
+The player alone does not run the conversation; Node and provider API keys are required.
+FoxGlove needs no additional animation setup. Provider usage is billed to your accounts.
+For startup problems, read PowerShell output and ``.cache/player.log``.
+
+See the [harness quickstart]($sourceUrl/README.md#quickstart),
+[Windows installation guide]($sourceUrl/player/README.md#install-a-release-windows),
+[custom character guide]($sourceUrl/docs/bring-your-own-character.md), and
+[architecture]($sourceUrl/docs/architecture.md).
+
+Verify the ZIP using ``Get-FileHash -Algorithm SHA256`` and ``SHA256SUMS-windows-x64``.
+Built from $Tag ($commit), Kaigen $engineVersion.
+
+SHA-256:
+``````text
+$($sumLines -join "`n")
+``````
+"@
     [IO.File]::WriteAllText($notes, $releaseNotes, [Text.UTF8Encoding]::new($false))
-    # Reuse a macOS draft without overwriting its notes or checksum asset.
+    # A rerun may add missing assets to this platform's draft.
     $releases = Invoke-Checked gh @('release', 'list', '--limit', '1000', '--json', 'tagName,isDraft') | ConvertFrom-Json
     $existing = @($releases | Where-Object { $_.tagName -eq $Tag })
     if ($existing.Count) {
@@ -177,7 +213,7 @@ Built from $Tag ($commit), Kaigen $engineVersion.
         Invoke-Checked gh @('release', 'upload', $Tag, $zip, $checksum)
     }
     else {
-        Invoke-Checked gh @('release', 'create', $Tag, '--draft', '--verify-tag', '--title', $Tag, '--notes-file', $notes, $zip, $checksum)
+        Invoke-Checked gh @('release', 'create', $Tag, '--draft', '--verify-tag', '--title', "v$version - Windows x64", '--notes-file', $notes, $zip, $checksum)
     }
     Write-Host "Draft release $Tag updated; review it on GitHub before publishing."
 }

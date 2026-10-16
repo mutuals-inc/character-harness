@@ -2,7 +2,19 @@
 
 The harness [Mutuals](https://github.com/mutuals-inc) uses to give life to its characters: a character you can talk to by voice, with a face and body that react to what it says.
 
-> Status: pre-release. The runtime and the player work end to end. Ready-made player builds are on this repo's GitHub Releases, or you can build the player yourself with the Kaigen engine.
+> Status: pre-release. The runtime and the player work end to end. Download a ready-made player below, or build the player yourself with the Kaigen engine.
+
+## Player downloads
+
+<!-- player-releases:start -->
+- [Windows x64 — v0.1.0-windows-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-windows-x64)
+<!-- player-releases:end -->
+
+These links track the newest published version for each available platform,
+including pre-releases, and update automatically when releases change.
+[All releases](https://github.com/mutuals-inc/character-harness/releases).
+Follow the release's instructions to run the player and Node harness together;
+using a player release needs no Kaigen SDK or licence.
 
 ## How it works
 
