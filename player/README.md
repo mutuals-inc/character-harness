@@ -48,6 +48,42 @@ To have the runtime's `npm start` open it, put this in the harness's `.env`:
 HARNESS_PLAYER="cd player && hz/hzbuild macos run"
 ```
 
+### Windows
+
+From `player/`, link the pinned engine with `kaigen restore`, then build with
+`hz\hzbuild.exe windows` (add `run` to launch). The development executable is
+`out/windows/debug/CharacterPlayer.exe`. For distribution, use the publish build
+through `release-windows.ps1` below, rather than copying the debug executable.
+
+## Install a release (Windows)
+
+1. Download `character-player-<version>-windows-x64.zip` and
+   `SHA256SUMS-windows-x64` from the GitHub release. Compare the ZIP's hash from
+   `Get-FileHash .\character-player-<version>-windows-x64.zip -Algorithm SHA256`
+   with the checksum file, then extract the ZIP to a permanent folder.
+2. Keep the entire extracted folder together: its `.exe`, cooked assets and
+   any DLLs. No Kaigen SDK, licence, compiler or Developer Mode is needed to run
+   the player. The current Windows packages are unsigned.
+3. Install Node 24 or later, download the matching harness source release and
+   run these commands from its root:
+
+   ```powershell
+   npm.cmd install
+   Copy-Item .env.example .env
+   notepad .env
+   ```
+
+4. Fill in `XAI_API_KEY` and `ELEVENLABS_API_KEY`. Set `HARNESS_PLAYER` to the
+   extracted executable, keeping the nested quotes for a path with spaces:
+
+   ```dotenv
+   HARNESS_PLAYER='"C:/Users/you/Apps/character-player-0.1.0-windows-x64/Character Player.exe"'
+   ```
+
+5. Run `npm.cmd start` from the harness root. It starts the runtime and the
+   prebuilt player together. Allow microphone access for desktop apps in Windows
+   Settings and speak first. The player alone does not run the conversation.
+
 ## Settings
 
 The runtime sets the first two when it starts the player.
@@ -114,3 +150,73 @@ MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" MACOS_NOTA
 ```
 
 Either way, review the draft and publish it. CI doesn't build the player, so releases are made this way.
+
+## Releasing (Windows)
+
+From a clean checkout of a `vX.Y.Z` tag, on Windows with the Kaigen SDK linked at
+`player/hz`, an activated licence and the native toolchain installed:
+
+```powershell
+.\player\release-windows.ps1 v0.1.0 -NoRelease
+```
+
+The script temporarily sets the product version from the tag, removes cached
+VRM imports and old publish output, runs `hz\hzbuild.exe windows publish`, and
+restores `hzproject.hzt` even if the build fails. It packages the published
+executable and runtime files, excluding linker intermediates, into:
+
+```text
+player/out/release/windows-x64/
+  character-player-0.1.0-windows-x64/
+    Character Player.exe
+    ...published runtime files, README and licences...
+  character-player-0.1.0-windows-x64.exe
+  character-player-0.1.0-windows-x64.zip
+  SHA256SUMS-windows-x64
+```
+
+The `.exe` release asset is the native player application, also included inside
+the ZIP. It needs any published runtime files beside it; it is not a
+self-extracting installer. Recommend the ZIP for a complete download and keep
+the separate EXE alongside those same-version runtime files when using it.
+The script includes the external `cooked/` assets even when an early SDK omits
+them from its publish output, including the `.zst` files the native publish
+build reads. Browser-only `.br` sidecars are excluded.
+The release packages the
+player, like the macOS script; users still install Node, fetch the harness
+source, configure their own keys and run `npm start` as described above.
+
+For a local preview of uncommitted work, without creating a tag or uploading:
+
+```powershell
+.\player\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+```
+
+To attach the EXE, ZIP and checksums to a draft GitHub release, push the tag and run
+without `-NoRelease` (requires `gh` installed and authenticated):
+
+```powershell
+.\player\release-windows.ps1 v0.1.0
+```
+
+If a macOS draft already exists for the tag, the Windows assets are added to
+it without replacing its notes or checksums. Existing assets are not silently
+overwritten, and public releases are not modified. Review the draft before
+publishing. Artifacts stay under the platform-specific output directory so
+this script does not delete macOS packages.
+
+The SDK must include `hz/tools/brotli/brotli.exe` for publish asset compression.
+Some early Windows SDK drops omit it. If the release script reports that it is
+missing, run this once from `player/`, then repeat the release command:
+
+```powershell
+.\setup-windows-publish.ps1
+.\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+```
+
+Setup supplies the missing build tool using Node's built-in Brotli encoder and
+a small Windows .NET Framework launcher. It installs only the adapter files in
+the linked SDK's `tools/brotli/` directory and leaves an existing native Brotli
+tool unchanged. Node is required on the build machine; these adapter files do
+not ship with the player. Rerun setup if Node moves, to refresh its saved path.
+A successful development build does not verify publish prerequisites.

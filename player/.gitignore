@@ -5,6 +5,7 @@
 /cooked/
 /src/generated/
 /compile_commands.json
+/vc*.pdb
 *.dSYM/
 # written while the app runs
 /logs/

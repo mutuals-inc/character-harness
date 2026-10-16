@@ -1,0 +1,177 @@
+#Requires -Version 5.1
+<#
+.SYNOPSIS
+Build the Windows player and attach its EXE and portable ZIP to a draft GitHub release.
+.EXAMPLE
+.\player\release-windows.ps1 v0.1.0 -NoRelease
+.EXAMPLE
+.\player\release-windows.ps1 v0.1.0
+.EXAMPLE
+.\player\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+#>
+[CmdletBinding()]
+param(
+    [Parameter(Mandatory = $true, Position = 0)]
+    [ValidatePattern('^v[0-9]+\.[0-9]+\.[0-9]+$')]
+    [string] $Tag,
+    [switch] $NoRelease,
+    # Local previews only: package the working tree without requiring a tag.
+    [switch] $AllowDirty
+)
+
+Set-StrictMode -Version Latest
+$ErrorActionPreference = 'Stop'
+$PSNativeCommandUseErrorActionPreference = $false
+if ($env:OS -ne 'Windows_NT') { throw 'Run this script on Windows.' }
+if ($AllowDirty -and -not $NoRelease) { throw '-AllowDirty requires -NoRelease.' }
+
+function Invoke-Checked {
+    param([string] $Command, [string[]] $Arguments)
+    & $Command @Arguments
+    if ($LASTEXITCODE -ne 0) {
+        throw "$Command failed (exit $LASTEXITCODE)."
+    }
+}
+
+function Remove-PlayerOutput {
+    param([string] $RelativePath)
+    $target = [IO.Path]::GetFullPath((Join-Path $PSScriptRoot $RelativePath))
+    $playerRoot = [IO.Path]::GetFullPath($PSScriptRoot).TrimEnd('\', '/') + '\'
+    if (-not $target.StartsWith($playerRoot, [StringComparison]::OrdinalIgnoreCase)) {
+        throw "Refusing to remove a path outside player: $target"
+    }
+    if (Test-Path -LiteralPath $target) { Remove-Item -LiteralPath $target -Recurse -Force }
+}
+
+Push-Location $PSScriptRoot
+try {
+    $repoRoot = (Invoke-Checked git @('rev-parse', '--show-toplevel')).Trim()
+    $commit = (Invoke-Checked git @('rev-parse', 'HEAD')).Trim()
+    if (-not $AllowDirty) {
+        $changes = @(Invoke-Checked git @('-C', $repoRoot, 'status', '--porcelain'))
+        if ($changes.Count) { throw "The tree has changes; release from a clean checkout of $Tag. For a local preview, use -NoRelease -AllowDirty." }
+        $tagCommit = (Invoke-Checked git @('rev-parse', '--verify', "refs/tags/$Tag^{commit}")).Trim()
+        if ($tagCommit -ne $commit) { throw "HEAD is not $Tag; check out that tag first." }
+    }
+    if (-not $NoRelease) {
+        $null = Get-Command gh -ErrorAction Stop
+        $remoteTags = @(Invoke-Checked git @('ls-remote', '--tags', 'origin', "refs/tags/$Tag", "refs/tags/$Tag^{}"))
+        $peeled = @($remoteTags | Where-Object { $_ -match '\^\{\}$' })
+        $remoteCommit = if ($peeled.Count) { ($peeled[0] -split '\s+')[0] }
+            elseif ($remoteTags.Count) { ($remoteTags[0] -split '\s+')[0] } else { '' }
+        if ($remoteCommit -ne $commit) { throw "$Tag on origin is not this commit; push the tag first." }
+    }
+
+    $builder = Join-Path $PSScriptRoot 'hz\hzbuild.exe'
+    if (-not (Test-Path -LiteralPath $builder)) { throw 'player/hz is missing; run kaigen restore from player first.' }
+    if (-not (Test-Path -LiteralPath 'hz\tools\brotli\brotli.exe')) {
+        throw 'The Kaigen SDK is missing its Brotli publish tool. Run .\setup-windows-publish.ps1 from player, then retry this release command.'
+    }
+
+    $projectPath = Join-Path $PSScriptRoot 'hzproject.hzt'
+    $projectBytes = [IO.File]::ReadAllBytes($projectPath)
+    $projectText = [IO.File]::ReadAllText($projectPath)
+    $version = $Tag.Substring(1)
+    $versionPattern = [regex]::new('(?m)^(  version )[^\r\n]*')
+    if ($versionPattern.Matches($projectText).Count -ne 1) { throw 'hzproject.hzt: expected one publish version line.' }
+    $engineMatch = [regex]::Match($projectText, '(?m)^engine_version ([^\r\n]+)')
+    $engineVersion = $engineMatch.Groups[1].Value
+    try {
+        $releaseProject = $versionPattern.Replace($projectText, "`${1}$version")
+        [IO.File]::WriteAllText($projectPath, $releaseProject, [Text.UTF8Encoding]::new($false))
+        # Imported personal models and stale publish files must not ship.
+        Remove-PlayerOutput 'cooked\vrm'
+        Remove-PlayerOutput 'out\windows\publish'
+        Invoke-Checked $builder @('windows', 'publish')
+    }
+    finally {
+        [IO.File]::WriteAllBytes($projectPath, $projectBytes)
+    }
+
+    $publishRoot = Join-Path $PSScriptRoot 'out\windows\publish'
+    $executables = @(Get-ChildItem -LiteralPath $publishRoot -Filter '*.exe' -Recurse -File |
+        Where-Object { $_.Directory.Parent.FullName -eq $publishRoot })
+    if ($executables.Count -ne 1) { throw 'The publish build did not produce exactly one player executable in out/windows/publish/<project>.' }
+    $exe = $executables[0]
+    $bundle = $exe.Directory.FullName
+    $output = Join-Path $PSScriptRoot 'out\release\windows-x64'
+    $packageName = "character-player-$version-windows-x64"
+    Remove-PlayerOutput 'out\release\windows-x64'
+    $stage = Join-Path $output $packageName
+    $null = New-Item -ItemType Directory -Path $stage -Force
+    # Publish can leave linker intermediates beside the app; never distribute them.
+    Get-ChildItem -LiteralPath $bundle -Force | Where-Object {
+        $_.Name -ne 'obj' -and $_.Extension -notin @('.pdb', '.lib', '.exp', '.ilk')
+    } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse }
+    # Early Windows SDKs publish the EXE but omit its external cooked assets.
+    if (-not (Test-Path -LiteralPath (Join-Path $stage 'cooked\catalog.hza'))) {
+        $cookedRoot = Join-Path $PSScriptRoot 'cooked'
+        if (-not (Test-Path -LiteralPath (Join-Path $cookedRoot 'catalog.hza'))) {
+            throw 'The publish build did not produce cooked/catalog.hza; refusing to package an incomplete player.'
+        }
+        Get-ChildItem -LiteralPath $cookedRoot -Recurse -File | Where-Object {
+            $_.Extension -ne '.br'
+        } | ForEach-Object {
+            $relative = $_.FullName.Substring($cookedRoot.Length).TrimStart('\', '/')
+            $destination = Join-Path (Join-Path $stage 'cooked') $relative
+            $null = New-Item -ItemType Directory -Path ([IO.Path]::GetDirectoryName($destination)) -Force
+            Copy-Item -LiteralPath $_.FullName -Destination $destination
+        }
+    }
+    Copy-Item -LiteralPath (Join-Path $repoRoot 'LICENSE') -Destination (Join-Path $stage 'LICENSE.txt')
+    Copy-Item -LiteralPath 'assets\vad\LICENSE' -Destination (Join-Path $stage 'LICENSE-silero-vad.txt')
+    $readme = @"
+Character Player $version - Windows x64
+
+Keep this entire folder together, including any cooked/ assets and DLLs.
+This is the player, not the Node conversation runtime. No Kaigen installation
+or licence is needed to run it.
+
+From a matching character-harness source checkout:
+  npm install
+  Copy-Item .env.example .env
+
+Add your XAI_API_KEY and ELEVENLABS_API_KEY to .env, then set:
+  HARNESS_PLAYER='"C:/path/to/$packageName/$($exe.Name)"'
+
+From the harness root run:
+  npm start
+
+Allow microphone access for desktop apps in Windows Settings and speak first.
+This build is unsigned; Windows may show a publisher warning.
+Built from $Tag ($commit), Kaigen $engineVersion.
+"@
+    [IO.File]::WriteAllText((Join-Path $stage 'README.txt'), $readme, [Text.UTF8Encoding]::new($false))
+    $releaseExe = Join-Path $output "$packageName.exe"
+    Copy-Item -LiteralPath (Join-Path $stage $exe.Name) -Destination $releaseExe
+    $zip = Join-Path $output "$packageName.zip"
+    Compress-Archive -LiteralPath $stage -DestinationPath $zip -CompressionLevel Optimal
+    $checksum = Join-Path $output 'SHA256SUMS-windows-x64'
+    $sumLines = @($releaseExe, $zip) | ForEach-Object {
+        "$((Get-FileHash -LiteralPath $_ -Algorithm SHA256).Hash.ToLowerInvariant())  $([IO.Path]::GetFileName($_))"
+    }
+    [IO.File]::WriteAllText($checksum, (($sumLines -join "`n") + "`n"), [Text.UTF8Encoding]::new($false))
+    Write-Host "Player executable: $(Join-Path $stage $exe.Name)"
+    Write-Host "EXE release asset: $releaseExe (keep runtime files from the ZIP beside it)"
+    Write-Host "Portable ZIP: $zip"
+    $sumLines | ForEach-Object { Write-Host $_ }
+    if ($NoRelease) { Write-Host 'Local build complete; no GitHub release created.'; return }
+
+    $notes = Join-Path $output 'notes.md'
+    $releaseNotes = "Windows x64 player, unsigned. Extract the complete ZIP; it contains $($exe.Name) and its runtime files. The separate EXE is the same player binary and needs the runtime files from the ZIP beside it. No Kaigen installation is required. See player/README.md for connecting the Node harness.`n`nBuilt from $Tag ($commit), Kaigen $engineVersion.`n`nSHA-256:`n$($sumLines -join "`n")`n"
+    [IO.File]::WriteAllText($notes, $releaseNotes, [Text.UTF8Encoding]::new($false))
+    # Reuse a macOS draft without overwriting its notes or checksum asset.
+    $releases = Invoke-Checked gh @('release', 'list', '--limit', '1000', '--json', 'tagName,isDraft') | ConvertFrom-Json
+    $existing = @($releases | Where-Object { $_.tagName -eq $Tag })
+    if ($existing.Count) {
+        if (-not $existing[0].isDraft) { throw 'This release is already public; refusing to change it.' }
+        Invoke-Checked gh @('release', 'upload', $Tag, $releaseExe, $zip, $checksum)
+    }
+    else {
+        Invoke-Checked gh @('release', 'create', $Tag, '--draft', '--verify-tag', '--title', $Tag, '--notes-file', $notes, $releaseExe, $zip, $checksum)
+    }
+    Write-Host "Draft release $Tag updated; review it on GitHub before publishing."
+}
+finally {
+    Pop-Location
+}

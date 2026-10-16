@@ -763,7 +763,7 @@ hz_internal b32 player_vrm_collider(StringBuilder *sb, PJson *gltf, ModelBlobAss
     b[k] = pjson_count(tail) == 3 ? player_vrm_num(pjson_at(tail, k), a[k], -1000, 1000) : a[k];
   }
   f32 d[3] = {b[0] - a[0], b[1] - a[1], b[2] - a[2]};
-  f32 len = __builtin_sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
+  f32 len = m_sqrtf(d[0] * d[0] + d[1] * d[1] + d[2] * d[2]);
   b32 capsule = len > 1e-5f;
   // a capsule runs along its local X (direction 0): turn X onto the segment
   f32 q[4] = {0, 0, 0, 1};
@@ -774,7 +774,7 @@ hz_internal b32 player_vrm_collider(StringBuilder *sb, PJson *gltf, ModelBlobAss
       q[0] = 0, q[1] = 0, q[2] = 1, q[3] = 0; // opposite X: half a turn about Z
     } else {
       // the shortest arc from X: axis X cross u, normalised with w
-      f32 n = __builtin_sqrtf(w * w + u[2] * u[2] + u[1] * u[1]);
+      f32 n = m_sqrtf(w * w + u[2] * u[2] + u[1] * u[1]);
       q[0] = 0, q[1] = -u[2] / n, q[2] = u[1] / n, q[3] = w / n;
     }
   }
@@ -831,7 +831,7 @@ hz_internal CString player_vrm_spring_text(PJson *gltf, ModelBlobAsset *mb, PJso
     f32 v[3];
     for (u32 k = 0; k < 3; k++)
       v[k] = player_vrm_num(pjson_at(gd, k), 0, -1, 1);
-    f32 len = __builtin_sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
+    f32 len = m_sqrtf(v[0] * v[0] + v[1] * v[1] + v[2] * v[2]);
     // a direction, so a longer one doesn't pull harder; none at all means down
     if (len > 1e-4f)
       for (u32 k = 0; k < 3; k++)
