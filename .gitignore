@@ -11,5 +11,3 @@ Thumbs.db
 # models the runtime prepares for the player
 .cache/
 
-# engine CLI metadata when invoked from the harness root
-/out/
