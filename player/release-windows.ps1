@@ -65,7 +65,7 @@ try {
     $builder = Join-Path $PSScriptRoot 'hz\hzbuild.exe'
     if (-not (Test-Path -LiteralPath $builder)) { throw 'player/hz is missing; run kaigen restore from player first.' }
     if (-not (Test-Path -LiteralPath 'hz\tools\brotli\brotli.exe')) {
-        throw 'The Kaigen SDK is missing its Brotli publish tool. Run .\setup-windows-publish.ps1 from player, then retry this release command.'
+        throw 'The linked Kaigen SDK is missing tools/brotli/brotli.exe, required by publish. Repair the SDK installation or obtain the missing build tool from Kaigen, then retry.'
     }
 
     $projectPath = Join-Path $PSScriptRoot 'hzproject.hzt'
@@ -114,7 +114,7 @@ try {
     Get-ChildItem -LiteralPath $bundle -Force | Where-Object {
         $_.Name -ne 'obj' -and $_.Extension -notin @('.pdb', '.lib', '.exp', '.ilk')
     } | ForEach-Object { Copy-Item -LiteralPath $_.FullName -Destination $stage -Recurse }
-    # Early Windows SDKs publish the EXE but omit its external cooked assets.
+    # Include external assets when the SDK's publish output contains only the EXE.
     if (-not (Test-Path -LiteralPath (Join-Path $stage 'cooked\catalog.hza'))) {
         $cookedRoot = Join-Path $PSScriptRoot 'cooked'
         if (-not (Test-Path -LiteralPath (Join-Path $cookedRoot 'catalog.hza'))) {

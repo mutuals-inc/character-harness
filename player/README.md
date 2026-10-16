@@ -184,7 +184,7 @@ The `.exe` release asset is the native player application, also included inside
 the ZIP. It needs any published runtime files beside it; it is not a
 self-extracting installer. Recommend the ZIP for a complete download and keep
 the separate EXE alongside those same-version runtime files when using it.
-The script includes the external `cooked/` assets even when an early SDK omits
+The script includes the external `cooked/` assets even when publish output omits
 them from its publish output, including the `.zst` files the native publish
 build reads. Browser-only `.br` sidecars are excluded.
 The release packages the
@@ -211,17 +211,7 @@ publishing. Artifacts stay under the platform-specific output directory so
 this script does not delete macOS packages.
 
 The SDK must include `hz/tools/brotli/brotli.exe` for publish asset compression.
-Some early Windows SDK drops omit it. If the release script reports that it is
-missing, run this once from `player/`, then repeat the release command:
-
-```powershell
-.\setup-windows-publish.ps1
-.\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
-```
-
-Setup supplies the missing build tool using Node's built-in Brotli encoder and
-a small Windows .NET Framework launcher. It installs only the adapter files in
-the linked SDK's `tools/brotli/` directory and leaves an existing native Brotli
-tool unchanged. Node is required on the build machine; these adapter files do
-not ship with the player. Rerun setup if Node moves, to refresh its saved path.
-A successful development build does not verify publish prerequisites.
+If it is missing, repair the SDK installation or obtain the missing build tool
+from Kaigen before releasing. The release script checks this prerequisite but
+does not modify the installed SDK. A successful development build does not
+verify publish prerequisites.
