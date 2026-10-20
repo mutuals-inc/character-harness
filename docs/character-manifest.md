@@ -81,6 +81,7 @@ env_file: ../../.env
 | `params.temperature` | no | `chat_completions` only. |
 | `params.max_tokens` | no | Longest reply, in tokens. |
 | `params.reasoning_effort` | no | `responses` only, like `low`. |
+| `silent_reply` | no | A token like `[pass]` the model answers when it means to say nothing. A reply that starts with it is silent. The character's prompt teaches the model when to use it; the runtime adds nothing to the prompt. |
 
 Models an extension uses belong to that extension, not here. See "The chat model" in `architecture.md`.
 

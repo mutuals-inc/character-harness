@@ -104,21 +104,29 @@ async function until(done: () => boolean, what: string) {
 
 // One session over a fake socket. `answer` plays every upstream request (the
 // chat model and the voice), so nothing leaves the machine.
-function session(t: TestContext, answer: (n: number, signal: AbortSignal) => Response, exts: Loaded[] = []) {
+function session(
+	t: TestContext,
+	answer: (n: number, signal: AbortSignal) => Response,
+	exts: Loaded[] = [],
+	c: Character = character,
+) {
 	const lines: string[] = [];
 	t.mock.method(console, "log", (line: string) => { lines.push(line); });
 	const calls: AbortSignal[] = [];
+	const bodies: Record<string, unknown>[] = [];
 	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
 		const signal = init.signal as AbortSignal;
 		calls.push(signal);
+		bodies.push(JSON.parse(init.body as string));
 		return answer(calls.length - 1, signal);
 	});
 	const { ws, app } = fakeSocket();
-	runSession(ws as unknown as WebSocket, character, exts);
+	runSession(ws as unknown as WebSocket, c, exts);
 	const logged = (text: string) => lines.some((l) => l.includes(text));
 	return {
 		app,
 		calls,
+		bodies,
 		logged,
 		// what the app got for one id, without the staging beats
 		sentFor: (id: number) => ws.sent.filter((m) => m.id === id && m.t !== "beat"),
@@ -259,4 +267,166 @@ test("closing the session aborts every reply and sentence still running, and a r
 	await s.close();
 	assert.deepEqual(s.calls.map((c) => c.aborted), [true, true, true, true]);
 	assert.equal(s.calls.length, 4);
+});
+
+// The model's own silent reply, `models.chat.silent_reply`.
+
+const quiet = { ...character, chat: { ...character.chat, silent_reply: "[pass]" } } as Character;
+
+// A reply streamed in `parts`, one event each. With `signal`, the body stays
+// open after them until the request is aborted, like a model still writing.
+function streamed(parts: string[], signal?: AbortSignal): Response {
+	const enc = new TextEncoder();
+	return new Response(
+		new ReadableStream({
+			start(c) {
+				for (const p of parts) c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`));
+				if (signal) {
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+					return;
+				}
+				c.enqueue(enc.encode("data: [DONE]\n\n"));
+				c.close();
+			},
+		}),
+	);
+}
+
+const silentTurn = [
+	{ t: "llm_delta", id: 5, text: "…" },
+	{ t: "llm_done", id: 5 },
+];
+
+test("a silent reply split across chunks is silent, and after_llm sees it", async (t) => {
+	let seen: Record<string, unknown> = {};
+	const s = session(t, () => streamed(["[pa", "ss]"]), [hook("after_llm", ({ state }) => { seen = { ...state }; })], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn to end");
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	assert.equal(seen.reply, "[pass]");
+	assert.equal(seen.cancel, true);
+	await s.close();
+});
+
+test("a silent reply after leading whitespace is silent", async (t) => {
+	const s = session(t, () => streamed(["\n ", " [pass]"]), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn to end");
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	await s.close();
+});
+
+test("a reply that starts like the silent reply and then differs goes out whole, in order", async (t) => {
+	const s = session(t, () => streamed(["[", "teas", "ing] hi", " there"]), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[" },
+		{ t: "llm_delta", id: 5, text: "teas" },
+		{ t: "llm_delta", id: 5, text: "ing] hi" },
+		{ t: "llm_delta", id: 5, text: " there" },
+		{ t: "llm_done", id: 5 },
+	]);
+	await s.close();
+});
+
+test("a reply that ends partway into the silent reply is sent, not swallowed", async (t) => {
+	const s = session(t, () => streamed(["[pa"]), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.sentFor(5), answered("[pa"));
+	await s.close();
+});
+
+test("text after the silent reply is not sent, and the model is stopped", async (t) => {
+	const s = session(t, (_n, signal) => streamed(["[pass] but", " actually"], signal), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn to end");
+	assert.equal(s.calls[0].aborted, true);
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	await s.close();
+});
+
+test("a reply that is only the silent reply is not llm_empty, but an empty one still is", async (t) => {
+	const s = session(t, (n) => (n === 0 ? reply("[pass]") : noText()), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the silent turn");
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: failed: llm_empty"), "the empty turn");
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	assert.deepEqual(s.sentFor(6), [{ t: "error", id: 6, text: "llm_empty" }]);
+	await s.close();
+});
+
+test("a silent reply while before_reply cancels ends the turn once, as a cancelled turn", async (t) => {
+	const held = gate();
+	let after = 0;
+	const s = session(
+		t,
+		() => reply("[pass]"),
+		[
+			hook("before_reply", async ({ state }) => {
+				await held.shut;
+				return { state: { ...state, cancel: true } };
+			}),
+			{ ...hook("after_llm", () => { after++; }), name: "after" },
+		],
+		quiet,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.calls.length === 1, "the model to answer");
+	held.open();
+	await until(() => s.logged("turn 5: cancelled"), "the turn to end");
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	assert.equal(after, 0);
+	await s.close();
+});
+
+test("the app's … in the history goes to the model as the silent reply", async (t) => {
+	const s = session(t, () => reply("hi"), [], quiet);
+	const past = [
+		{ role: "user", content: "talking to someone else" },
+		{ role: "assistant", content: "…" },
+		{ role: "user", content: "hi" },
+	];
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	const sent = s.bodies[0].messages as { role: string; content: string }[];
+	assert.deepEqual(sent.slice(1), [past[0], { role: "assistant", content: "[pass]" }, past[2]]);
+	await s.close();
+});
+
+test("without silent_reply, the token is an ordinary reply and … stays as it is", async (t) => {
+	const s = session(t, () => streamed(["[pa", "ss]"]));
+	const past = [
+		{ role: "assistant", content: "…" },
+		{ role: "user", content: "hi" },
+	];
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[pa" },
+		{ t: "llm_delta", id: 5, text: "ss]" },
+		{ t: "llm_done", id: 5 },
+	]);
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), past);
+	await s.close();
+});
+
+test("a reply held by before_reply and by the silent reply goes out once both let it", async (t) => {
+	const held = gate();
+	let runs = 0;
+	const s = session(t, () => streamed(["[pa", "use] ok"]), [hook("before_reply", () => { runs++; return held.shut; })], quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => runs === 1 && s.calls.length === 1, "the reply to be held");
+	await new Promise((r) => setTimeout(r, 5));
+	assert.deepEqual(s.sentFor(5), []);
+	held.open();
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[pa" },
+		{ t: "llm_delta", id: 5, text: "use] ok" },
+		{ t: "llm_done", id: 5 },
+	]);
+	await s.close();
 });

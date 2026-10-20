@@ -33,6 +33,13 @@ on_session_end     the call or conversation ended
 
 A blocking extension on `before_reply` or `before_llm` ends the turn by setting `cancel: true`. The runtime skips or aborts the LLM call, nothing is spoken, and `after_turn` still fires. If a `before_reply` extension times out, the character replies.
 
+The chat model can also stay quiet itself, by answering its `silent_reply` (see "The chat model"). The two work together:
+
+- A `before_reply` gate is cheap and fast. Use it for what a rule or a small model can tell: the line was a cough, or another voice in the room.
+- The chat model's silent reply is for what needs the whole context to tell: the persona, its rules, the conversation so far. The line was meant for someone else, or the character has decided to ignore it.
+
+Either way the app gets the same silent reply.
+
 ## Hooks
 
 | Hook | Fires | State ready | Typical use |
@@ -78,6 +85,7 @@ models:
       temperature: 0.9               # chat_completions only
       max_tokens: 1200
       # reasoning_effort: low        # responses only
+    silent_reply: "[pass]"           # optional, what the model answers to say nothing
 ```
 
 | `api` | For |
@@ -87,6 +95,8 @@ models:
 
 - The runtime sends `prompt` as the system message, then `messages`. It streams the answer into sentences for `on_sentence` and writes the full text to `reply`.
 - On failure the runtime sets `error` and ends the turn. `after_turn` still fires.
+- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is what the model wrote. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
+- The runtime never tells the model about `silent_reply`. The character's prompt says when to answer it. The app keeps a silent reply in the history as `…`, and the runtime turns it back into the token before the model sees it.
 
 ## The voice
 
@@ -137,7 +147,7 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `sentence` | the current sentence, inside `on_sentence` and `on_speak` |
 | `beats` | inside `on_sentence`: cues an extension adds for this sentence (see "Beats") |
 | `timing` | when each character of the sentence is heard, inside `on_speak` |
-| `cancel` | `true` to end the turn without replying, set on `before_reply` or `before_llm` |
+| `cancel` | `true` to end the turn without replying, set on `before_reply` or `before_llm`, or by the runtime when the model answers its `silent_reply` |
 | `error` | why the turn failed, if it did |
 | `ext.<name>` | whatever an extension wants to keep |
 
