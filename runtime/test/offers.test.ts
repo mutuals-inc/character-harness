@@ -244,7 +244,7 @@ test("a voice listener that rejects is logged, not left unhandled", async () => 
 test("an offer needs text, and its source is a word", () => {
 	const o = new Offers(undefined, () => {});
 	assert.throws(() => o.offer({ text: " " }, "x"), /text/);
-	assert.throws(() => o.offer({ text: "hi", source: "Twitch Chat" }, "x"), /source/);
+	assert.throws(() => o.offer({ text: "hi", source: "Group Chat" }, "x"), /source/);
 	assert.throws(() => o.offer({ text: "hi", ttl_ms: Number.NaN }, "x"), /ttl_ms/);
 	assert.throws(() => o.offer({ text: "hi", quiet_ms: 2 ** 31 * 10 }, "x"), /quiet_ms/);
 	assert.throws(() => o.offer({ text: "hi\u0000there" }, "x"), /control characters/);
@@ -322,7 +322,7 @@ test("a service starts after on_session_start, its ext reaches the hooks, and an
 	let ctx: ServiceContext | undefined;
 	let outcome: Promise<string> | undefined;
 	const seen: State[] = [];
-	const twitch = extension("twitch", {
+	const room = extension("room", {
 		hooks: [
 			["on_session_start", () => { order.push("on_session_start"); }],
 			["before_llm", (i) => { seen.push(i.state); }],
@@ -336,10 +336,10 @@ test("a service starts after on_session_start, its ext reaches the hooks, and an
 			order.push("stopped");
 		},
 	});
-	const s = session(t, [twitch]);
+	const s = session(t, [room]);
 	await until(() => ctx !== undefined, "the service");
 	assert.deepEqual(order, ["on_session_start", "service"]);
-	assert.deepEqual(ctx!.config, { from: "twitch" });
+	assert.deepEqual(ctx!.config, { from: "room" });
 	assert.deepEqual(ctx!.ext.get(), { chat: ["@ana: hi"] });
 	assert.equal(ctx!.voice.state, "offline");
 
@@ -355,8 +355,8 @@ test("a service starts after on_session_start, its ext reaches the hooks, and an
 	// the player injects the offer as the user's turn
 	s.app({ t: "llm", id: 1, history: [{ role: "user", content: "@ana asked: hi?" }] });
 	await until(() => seen.length === 1, "before_llm");
-	assert.deepEqual(seen[0].input, { text: "@ana asked: hi?", channel: "chat", offered_by: "twitch" });
-	assert.deepEqual(seen[0].ext.twitch, { chat: ["@ana: hi"] });
+	assert.deepEqual(seen[0].input, { text: "@ana asked: hi?", channel: "chat", offered_by: "room" });
+	assert.deepEqual(seen[0].ext.room, { chat: ["@ana: hi"] });
 	await until(() => s.logged("turn 1: replied"), "the reply");
 
 	// a turn the user started is a voice turn, and sees the service's latest write
@@ -364,7 +364,7 @@ test("a service starts after on_session_start, its ext reaches the hooks, and an
 	s.app({ t: "llm", id: 2, history: [{ role: "user", content: "hey" }] });
 	await until(() => seen.length === 2, "the second before_llm");
 	assert.deepEqual(seen[1].input, { text: "hey", channel: "voice" });
-	assert.deepEqual(seen[1].ext.twitch, { chat: ["@bia: yo"] });
+	assert.deepEqual(seen[1].ext.room, { chat: ["@bia: yo"] });
 
 	await s.close();
 	assert.equal(ctx!.signal.aborted, true);

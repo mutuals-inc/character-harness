@@ -31,7 +31,7 @@ on_session_end     the call or conversation ended
 
 A hook runs when the runtime calls it, in the middle of a turn. Between turns nothing runs, so on hooks alone the character only ever answers.
 
-A **service** is the part of an extension that runs on its own for the whole session, from just after `on_session_start` until the session ends. It watches something outside the conversation (a chat, the screen, a clock) and does two things with what it sees:
+A **service** is the part of an extension that runs on its own for the whole session, from just after `on_session_start` until the session ends. It watches something outside the conversation (a group chat, a game, a clock) and does two things with what it sees:
 
 - it keeps data in its `state.ext.<name>` at any time, and the next hook sees it there;
 - it **offers** a turn: a line of input, like "@ana asked in chat: …" or "nobody has said anything for a while".

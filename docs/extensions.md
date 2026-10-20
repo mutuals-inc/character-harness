@@ -100,7 +100,7 @@ A service writes only its own `ext.<name>`. To give a hook something to put in t
 `offer(req)` asks the runtime to start a turn with a line of input:
 
 ```ts
-const outcome = await offer({ text: "@ana asked in chat: are you a cat?", source: "chat" });
+const outcome = await offer({ text: "@ana asked in chat: what's your favorite song?", source: "chat" });
 ```
 
 | Key | Default | What |
@@ -156,7 +156,7 @@ The director reads its words from the character's config, usually a `director.ya
 
 Its `extension.yaml` asks for the key `model.api_key_env` names, so the runtime checks whichever key the character's director uses.
 
-Other ideas the hooks and services fit: reading a stream's chat and offering the best comment (a service, plus `before_llm` to put the chat in the prompt), awarding points from how the character ended a turn (`after_turn`), sending turns to a monitoring or eval service (`after_llm`, non-blocking), or blocking a topic before the model sees it (`before_llm`).
+Other ideas the hooks and services fit: watching a group chat and offering a message to answer (a service, plus `before_llm` to put the chat in the prompt), awarding points from how the character ended a turn (`after_turn`), sending turns to a monitoring or eval service (`after_llm`, non-blocking), or blocking a topic before the model sees it (`before_llm`).
 
 ## Sharing extensions
 
