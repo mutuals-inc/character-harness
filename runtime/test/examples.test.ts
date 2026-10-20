@@ -1,6 +1,6 @@
 // The example extensions in examples/extensions/. gesture-cues is the one
 // docs/your-first-extension.md builds: its handler, its check, and a
-// character that lists it. Run with `npm test`.
+// character that lists it. dead-air is the smallest service. Run with `npm test`.
 
 import assert from "node:assert/strict";
 import { cpSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from "node:fs";
@@ -8,12 +8,14 @@ import { tmpdir } from "node:os";
 import path from "node:path";
 import { after, test } from "node:test";
 import cues, { check } from "../../examples/extensions/gesture-cues/index.ts";
+import { check as deadAirCheck, service as deadAir } from "../../examples/extensions/dead-air/index.ts";
 import { checkCharacter } from "../src/check.ts";
 import { loadExtensions, runHook } from "../src/extensions.ts";
 import { loadCharacter } from "../src/manifest.ts";
 import type { State } from "../src/state.ts";
 
 const EXAMPLE = path.resolve(import.meta.dirname, "../../examples/extensions/gesture-cues");
+const DEAD_AIR = path.resolve(import.meta.dirname, "../../examples/extensions/dead-air");
 const FOXGLOVE = path.resolve(import.meta.dirname, "../../characters/foxglove");
 const config = { cues: { hello: "wave", "you did it": "cheer", "C++": "nod" } };
 const on = (sentence: string, beats: object[] = []) => cues({ event: "on_sentence", state: { sentence, beats }, config });
@@ -101,4 +103,44 @@ test("a gesture FoxGlove doesn't have is a warning; cues that aren't a map stop 
 	const broken = loadCharacter(withCues(`[wave]`));
 	const s = await checkCharacter(broken, await loadExtensions(broken.extensions), keys, true);
 	assert.match(s.errors.join(), /gesture-cues: `cues` must map/);
+});
+
+// dead-air, the smallest service: a copy of FoxGlove that lists it last
+test("dead-air loads as a service with no hooks, and offers a turn once the voice has been quiet", async () => {
+	const dir = mkdtempSync(path.join(tmpdir(), "harness-dead-air-"));
+	temp.push(dir);
+	cpSync(FOXGLOVE, dir, { recursive: true, filter: (src) => !src.includes(`${path.sep}animations`) });
+	const manifest = readFileSync(path.join(dir, "character.yaml"), "utf8")
+		.replaceAll("../../extensions", path.resolve(FOXGLOVE, "../../extensions"))
+		.replace(/\nextensions:\n/, `\nextensions:\n  - path: ${DEAD_AIR}\n    config: { after_s: 30 }\n`);
+	writeFileSync(path.join(dir, "character.yaml"), manifest);
+	const c = loadCharacter(dir);
+	const exts = await loadExtensions(c.extensions);
+	const dead = exts.find((e) => e.name === "dead-air")!;
+	assert.equal(dead.service, true);
+	assert.equal(dead.hooks.size, 0);
+	assert.equal(typeof dead.run, "function");
+	const r = await checkCharacter(c, exts, keys, true);
+	assert.deepEqual(r.errors, []);
+
+	const ac = new AbortController();
+	const asked: object[] = [];
+	const outcomes = ["accepted", "closed"];
+	await deadAir({
+		config: { after_s: 30, cooldown_s: 0.01 },
+		signal: ac.signal,
+		offer: async (req) => {
+			asked.push(req);
+			return outcomes.shift()!;
+		},
+	});
+	assert.equal(asked.length, 2);
+	assert.deepEqual({ ...asked[0], text: "" }, { text: "", source: "idle", quiet_ms: 30_000, ttl_ms: 600_000 });
+});
+
+test("dead-air's check refuses times that aren't seconds above 0", () => {
+	assert.deepEqual(deadAirCheck({ config: {} }), { errors: [] });
+	assert.match(deadAirCheck({ config: { after_s: 0 } }).errors.join(), /after_s/);
+	assert.match(deadAirCheck({ config: { cooldown_s: "1" as never } }).errors.join(), /cooldown_s/);
+	assert.match(deadAirCheck({ config: { text: " " } }).errors.join(), /text/);
 });

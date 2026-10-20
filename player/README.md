@@ -126,7 +126,7 @@ The runtime sets the first two when it starts the player.
 - Puts the character on the stage, with a portrait camera framed on the upper body.
 - Runs the engine's voice session against the runtime. The engine owns the socket, voice activity detection, playback and lip sync.
 - Applies beats: emotions reach the face, talking styles switch the body's loop, gestures play once, and camera words ease the framing toward `assets/mutuals/camera_moves.hzt`.
-- Never speaks first.
+- Speaks first only when an extension offers it a turn: it keeps a second socket to the runtime, the offers link, reports what its voice is doing there, and takes an offered line as the user's next turn while nobody is speaking (`../docs/protocol.md`, "The offers link"). The engine's own greeting stays off.
 
 ## FoxGlove
 
@@ -151,6 +151,7 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `release-macos.sh`, `macos.entitlements` | builds a release from a tag, signs it (ad hoc, or with a Developer ID and notarized), and attaches it to a draft GitHub release; the entitlements let the app use the mic |
 | `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera |
 | `src/app/player_vrm.c`, `.h` | runtime VRM import and caching: clips, face, rig and the generated character profile |
+| `src/app/player_offers.c`, `.h` | the offers link: the voice's status out, offered turns in |
 | `src/app/player_json.c`, `.h` | a small JSON reader for the VRM extensions and the runtime's clip table |
 | `src/app/app_character.c`, `.h`, `app_emote_clips.c` | loading and swapping the character, emote clips |
 | `src/app/app.c` | the build's entry file, which includes the others |

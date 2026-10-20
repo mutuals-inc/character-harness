@@ -4,7 +4,8 @@
 // Loads the character and its extensions, checks it (check.ts: every key it
 // needs is in .env, its body, what its extensions ask of the player), prepares
 // the model the player shows (rig/prepare.ts), serves the app's session socket
-// on ws://HOST:PORT/session/<token>, and starts the player when HARNESS_PLAYER
+// on ws://HOST:PORT/session/<token> and its offers link on
+// ws://HOST:PORT/session/<token>/offers (offers.ts), and starts the player when HARNESS_PLAYER
 // gives the command that opens it (player.ts). With --check it stops after the
 // checks and prints them all; a missing key or .env is then only a warning.
 // HOST defaults to 127.0.0.1; set HOST=0.0.0.0 to reach it from another device on the network.
@@ -15,15 +16,16 @@
 
 import { randomBytes } from "node:crypto";
 import { existsSync, readFileSync } from "node:fs";
-import { createServer, type IncomingMessage } from "node:http";
+import { createServer } from "node:http";
 import { parseEnv } from "node:util";
 import path from "node:path";
-import { WebSocketServer } from "ws";
+import WebSocket, { WebSocketServer } from "ws";
 import { checkCharacter, printable, printReport, shortPath } from "./check.ts";
 import { loadExtensions } from "./extensions.ts";
 import { ManifestError, loadCharacter, requiredKeys } from "./manifest.ts";
 import { manualStart, playerLog, startPlayer, type PlayerLaunch } from "./player.ts";
 import { runSession } from "./session.ts";
+import type { LinkHub } from "./offers.ts";
 
 function fail(message: string): never {
 	console.error(printable(message));
@@ -39,6 +41,8 @@ const host = process.env.HOST ?? "127.0.0.1";
 const port = Number(process.env.PORT ?? 8788);
 // the largest message the app sends is an `llm` with the whole conversation
 const MAX_MESSAGE_BYTES = 4 * 1024 * 1024;
+// the offers link carries small JSON: a status, an ack
+const MAX_LINK_MESSAGE_BYTES = 64 * 1024;
 
 let character;
 try {
@@ -85,18 +89,63 @@ const server = createServer((_req, res) => {
 });
 const token = randomBytes(16).toString("hex");
 const sessionPath = `/session/${token}`;
-const wss = new WebSocketServer({
-	server,
-	path: sessionPath,
-	maxPayload: MAX_MESSAGE_BYTES,
+const linkPath = `${sessionPath}/offers`;
+const wss = new WebSocketServer({ noServer: true, maxPayload: MAX_MESSAGE_BYTES });
+const links = new WebSocketServer({ noServer: true, maxPayload: MAX_LINK_MESSAGE_BYTES });
+server.on("upgrade", (req, socket, head) => {
+	const at = new URL(req.url ?? "/", "http://localhost").pathname;
+	const to = at === sessionPath ? wss : at === linkPath ? links : null;
 	// the player sends no Origin; a browser always does
-	verifyClient: ({ req }: { req: IncomingMessage }) => req.headers.origin === undefined,
+	if (!to || req.headers.origin !== undefined) {
+		socket.write("HTTP/1.1 401 Unauthorized\r\nConnection: close\r\n\r\n");
+		socket.destroy();
+		return;
+	}
+	to.handleUpgrade(req, socket, head, (ws) => to.emit("connection", ws, req));
 });
-wss.on("connection", (ws) => runSession(ws, character, extensions));
-// the socket server re-emits the HTTP server's errors, so both are handled
+
+// The player keeps one offers link, and a newer one replaces it. Every session
+// hears it, so the link outlives a session socket that reconnects.
+let link: WebSocket | null = null;
+let offerIds = 0;
+const listeners = new Set<Parameters<LinkHub["subscribe"]>[0]>();
+const hub: LinkHub = {
+	isOpen: () => link?.readyState === WebSocket.OPEN,
+	send: (obj) => {
+		if (link?.readyState !== WebSocket.OPEN) return false;
+		link.send(JSON.stringify(obj));
+		return true;
+	},
+	nextId: () => ++offerIds,
+	subscribe: (fn) => {
+		listeners.add(fn);
+		return () => listeners.delete(fn);
+	},
+};
+const tell = (m: Parameters<Parameters<LinkHub["subscribe"]>[0]>[0]) => { for (const fn of [...listeners]) fn(m); };
+links.on("connection", (ws) => {
+	if (link) link.close(1000, "replaced by a newer link");
+	link = ws;
+	tell("open");
+	ws.on("message", (data, isBinary) => {
+		if (isBinary || link !== ws) return;
+		try {
+			const msg = JSON.parse(data.toString());
+			if (msg && typeof msg === "object" && !Array.isArray(msg)) tell(msg);
+		} catch {
+			// not JSON: not for us
+		}
+	});
+	ws.on("close", () => {
+		if (link !== ws) return;
+		link = null;
+		tell("closed");
+	});
+	ws.on("error", () => ws.close());
+});
+wss.on("connection", (ws) => runSession(ws, character, extensions, hub));
 const listenFailed = (e: Error) => fail(`could not listen on ${host}:${port}: ${e.message}`);
 server.on("error", listenFailed);
-wss.on("error", listenFailed);
 server.listen(port, host, () => {
 	const exts = extensions.map((e) => e.name).join(", ") || "none";
 	console.log(printable(`${character.name} on ws://${host}:${port}${sessionPath} (extensions: ${exts})`));

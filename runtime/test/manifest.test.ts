@@ -1,7 +1,7 @@
 // The `rig` section of character.yaml. Run with `npm test`.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -100,4 +100,27 @@ test("rig.springs is on unless set to false, and must be true or false", () => {
 	const off = loadCharacter(character(`  engine: ">=0.5.8"\n  model: model.vrm\n  springs: false`));
 	assert.equal(off.rig.kind === "model" && off.rig.springs, false);
 	assert.throws(() => loadCharacter(character(`  engine: ">=0.5.8"\n  model: model.vrm\n  springs: "no"`)), /rig\.springs/);
+});
+
+// a character whose one extension has this extension.yaml (YAML text)
+function withExtension(extensionYaml: string): string {
+	const dir = character(`  engine: ">=0.5.8"\n  model: model.vrm`);
+	const ext = path.join(dir, "ext");
+	mkdirSync(ext);
+	writeFileSync(path.join(ext, "extension.yaml"), extensionYaml);
+	writeFileSync(path.join(ext, "index.ts"), "export function service() {}\n");
+	const file = path.join(dir, "character.yaml");
+	writeFileSync(file, readFileSync(file, "utf8").replace("extensions: []", "extensions:\n  - path: ext"));
+	return dir;
+}
+
+test("an extension that is only a service needs no hooks, but a service needs a module handler", () => {
+	const c = loadCharacter(withExtension("name: svc\nhandler: index.ts\nservice: true\n"));
+	assert.equal(c.extensions[0].service, true);
+	assert.equal(c.extensions[0].hooks.size, 0);
+	assert.throws(() => loadCharacter(withExtension("name: svc\nhandler: index.ts\n")), /`hooks` is required/);
+	assert.throws(
+		() => loadCharacter(withExtension("name: svc\nhandler: https://example.invalid/hook\nservice: true\nhooks: [after_turn]\n")),
+		/`service` needs a module handler/,
+	);
 });

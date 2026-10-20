@@ -7,7 +7,7 @@ Three parts: the **player** (`player/`) renders the character, the **runtime** r
 The runtime fires an event at each step of a turn and knows nothing about what extensions do with it.
 
 ```
-input (voice, chat, screen)
+input (voice, chat, screen, or an offer from a service)
   ├→ before_reply   reply at all?
   └→ before_llm     build the prompt; inject context
      → llm          the character's model writes the reply
@@ -26,6 +26,26 @@ on_session_start   someone joined, or a call started
   … turns …
 on_session_end     the call or conversation ended
 ```
+
+## Services and offers
+
+A hook runs when the runtime calls it, in the middle of a turn. Between turns nothing runs, so on hooks alone the character only ever answers.
+
+A **service** is the part of an extension that runs on its own for the whole session, from just after `on_session_start` until the session ends. It watches something outside the conversation (a chat, the screen, a clock) and does two things with what it sees:
+
+- it keeps data in its `state.ext.<name>` at any time, and the next hook sees it there;
+- it **offers** a turn: a line of input, like "@ana asked in chat: …" or "nobody has said anything for a while".
+
+The runtime holds an offer until the player says its voice is free, then hands it to the player over the offers link (`protocol.md`). The player takes it as the user's next turn, or refuses it if someone started speaking first. A taken offer is an ordinary turn, through every hook, and its `input` says where it came from.
+
+```
+service: chat arrives → ext.set(chat) … picks one → offer("@ana asked: …")
+runtime: waits for the voice to be idle → offer → player
+player:  idle? takes it as the user's turn → llm
+turn:    before_reply, before_llm (sees ext.<name>), the reply, … after_turn
+```
+
+So the two halves meet in `ext`. The service decides when the character speaks, and the hooks shape what the turn says. See "Services" in `extensions.md`.
 
 ## Cancelling a turn
 
@@ -129,7 +149,7 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `schema` | state version |
 | `character` | the loaded manifest |
 | `session` | session id, the channel, and the end reason on `on_session_end` |
-| `input` | what came in this turn: `text`, and `channel` (`voice`, `chat` or `screen`) |
+| `input` | what came in this turn: `text`, and `channel` (`voice`, `chat` or `screen`, or the `source` of the offer it came from). A turn from an offer also has `offered_by`, the name of the extension that offered it |
 | `messages` | recent conversation |
 | `prompt` | the system prompt being built |
 | `reply` | the full reply, once written |
@@ -139,7 +159,7 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `timing` | when each character of the sentence is heard, inside `on_speak` |
 | `cancel` | `true` to end the turn without replying, set on `before_reply` or `before_llm` |
 | `error` | why the turn failed, if it did |
-| `ext.<name>` | whatever an extension wants to keep |
+| `ext.<name>` | whatever an extension wants to keep. Its service can write it between turns |
 
 The state shape is a public API and is versioned with `schema`. Renaming a key is a breaking change.
 

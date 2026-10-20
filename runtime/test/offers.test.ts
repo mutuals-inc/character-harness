@@ -1,0 +1,313 @@
+// Services and offers: a service runs for the session and keeps its data where
+// the hooks see it, and an offer waits for the player's voice to be free, goes
+// out over the offers link, and becomes a turn the player sends back. Driven
+// over a fake session socket and a fake link. Run with `npm test`.
+
+import assert from "node:assert/strict";
+import { EventEmitter } from "node:events";
+import { test, type TestContext } from "node:test";
+import WebSocket from "ws";
+import type { HookInput, Loaded, ServiceContext } from "../src/extensions.ts";
+import type { Character } from "../src/manifest.ts";
+import { Offers, type LinkHub } from "../src/offers.ts";
+import { runSession } from "../src/session.ts";
+import type { HookName, State } from "../src/state.ts";
+
+type LinkMessage = Parameters<Parameters<LinkHub["subscribe"]>[0]>[0];
+
+// The player's end of the offers link: what the runtime sent, and `player` to answer.
+function fakeHub() {
+	const listeners = new Set<(m: LinkMessage) => void>();
+	let ids = 0;
+	const hub = {
+		open: true,
+		sent: [] as Record<string, unknown>[],
+		isOpen: () => hub.open,
+		send: (obj: unknown) => {
+			if (!hub.open) return false;
+			hub.sent.push(obj as Record<string, unknown>);
+			return true;
+		},
+		nextId: () => ++ids,
+		subscribe: (fn: (m: LinkMessage) => void) => {
+			listeners.add(fn);
+			return () => { listeners.delete(fn); };
+		},
+		player: (m: LinkMessage) => { for (const fn of [...listeners]) fn(m); },
+		offers: () => hub.sent.filter((m) => m.t === "offer"),
+	};
+	return hub;
+}
+
+async function until(done: () => boolean, what: string, ms = 2000) {
+	const deadline = Date.now() + ms;
+	while (!done()) {
+		if (Date.now() > deadline) throw new Error(`timed out waiting for ${what}`);
+		await new Promise((r) => setTimeout(r, 1));
+	}
+}
+const pause = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+test("an offer waits for the voice to be free, then goes out with the epoch the player reported", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "  @ana asked: hi?  ", source: "chat", quiet_ms: 0 }, "chat");
+	hub.player({ t: "status", voice: "listening", epoch: 3 });
+	await pause(5);
+	assert.deepEqual(hub.offers(), []);
+	hub.player({ t: "status", voice: "idle", epoch: 4 });
+	await until(() => hub.offers().length === 1, "the offer");
+	assert.deepEqual(hub.offers()[0], { t: "offer", id: 1, epoch: 4, text: "@ana asked: hi?" });
+	hub.player({ t: "ack", id: 1, accepted: true });
+	assert.equal(await outcome, "accepted");
+	// the turn the player sends back for it names where it came from, once
+	assert.equal(o.take("someone else")?.by, undefined);
+	assert.deepEqual({ ...o.take("@ana asked: hi?"), at: 0 }, { text: "@ana asked: hi?", source: "chat", by: "chat", at: 0 });
+	assert.equal(o.take("@ana asked: hi?"), undefined);
+	o.close();
+});
+
+test("an offer waits for the voice to have been quiet for its quiet_ms", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	void o.offer({ text: "hello", quiet_ms: 60 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await pause(20);
+	assert.equal(hub.offers().length, 0);
+	await until(() => hub.offers().length === 1, "the quiet to be long enough");
+	o.close();
+});
+
+test("a refused offer waits for the next quiet moment, and goes out again", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "hello", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 1 });
+	await until(() => hub.offers().length === 1, "the offer");
+	// someone spoke just before it landed
+	hub.player({ t: "ack", id: 1, accepted: false });
+	hub.player({ t: "status", voice: "listening", epoch: 2 });
+	await pause(5);
+	assert.equal(hub.offers().length, 1);
+	hub.player({ t: "status", voice: "idle", epoch: 2 });
+	await until(() => hub.offers().length === 2, "the offer again");
+	assert.equal(hub.offers()[1].epoch, 2);
+	hub.player({ t: "ack", id: 2, accepted: true });
+	assert.equal(await outcome, "accepted");
+	o.close();
+});
+
+test("an accepted offer holds the next one until its turn has started and ended", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	void o.offer({ text: "one", quiet_ms: 0 }, "x");
+	const second = o.offer({ text: "two", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the first offer");
+	hub.player({ t: "ack", id: 1, accepted: true });
+	await pause(10);
+	// still idle: the player has not started the first one's turn yet
+	assert.equal(hub.offers().length, 1);
+	hub.player({ t: "status", voice: "thinking", epoch: 1 });
+	hub.player({ t: "status", voice: "idle", epoch: 1 });
+	await until(() => hub.offers().length === 2, "the second offer");
+	hub.player({ t: "ack", id: 2, accepted: true });
+	assert.equal(await second, "accepted");
+	o.close();
+});
+
+test("the highest priority goes first, then the oldest; an offer past its ttl expires", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const late = o.offer({ text: "late", quiet_ms: 0, ttl_ms: 20 }, "x");
+	void o.offer({ text: "low", quiet_ms: 0 }, "x");
+	void o.offer({ text: "high", quiet_ms: 0, priority: 5 }, "x");
+	assert.equal(await late, "expired");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "an offer");
+	assert.equal(hub.offers()[0].text, "high");
+	o.close();
+});
+
+test("without a link, or after it closes, offers wait; closing the session ends them", async () => {
+	const hub = fakeHub();
+	hub.open = false;
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "hello", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await pause(10);
+	assert.deepEqual(hub.sent, []);
+	hub.player("closed");
+	assert.equal(o.voice, "offline");
+	o.close();
+	assert.equal(await outcome, "closed");
+	assert.equal(await o.offer({ text: "again" }, "x"), "closed");
+});
+
+test("an offer needs text, and its source is a word", () => {
+	const o = new Offers(undefined, () => {});
+	assert.throws(() => o.offer({ text: " " }, "x"), /text/);
+	assert.throws(() => o.offer({ text: "hi", source: "Twitch Chat" }, "x"), /source/);
+	assert.throws(() => o.offer({ text: "hi", ttl_ms: Number.NaN }, "x"), /ttl_ms/);
+	o.close();
+});
+
+// --- a whole session, with a service in it ---
+
+function fakeSocket() {
+	const ws = Object.assign(new EventEmitter(), {
+		readyState: WebSocket.OPEN,
+		sent: [] as Record<string, unknown>[],
+		send(data: unknown) {
+			if (typeof data === "string") ws.sent.push(JSON.parse(data));
+		},
+	});
+	const app = (msg: unknown) => ws.emit("message", Buffer.from(JSON.stringify(msg)), false);
+	return { ws, app };
+}
+
+const character = {
+	dir: "",
+	id: "test",
+	name: "Test",
+	prompt: "You are a test.",
+	chat: { api: "chat_completions", base_url: "http://chat.test", api_key_env: "OFFERS_TEST_KEY", model: "m", params: {} },
+	stt: { provider: "elevenlabs", model: "s", keyterms: [] },
+	voice: { provider: "elevenlabs", voice_id: "v", model: "eleven_test", params: {}, drop_tags: [] },
+	rig: {},
+	extensions: [],
+	env_file: "",
+	manifest: {},
+} as unknown as Character;
+
+const reply = (text: string) =>
+	new Response(`data: ${JSON.stringify({ choices: [{ delta: { content: text } }] })}\n\ndata: [DONE]\n\n`);
+
+function extension(name: string, opts: { hooks?: [HookName, (i: HookInput) => unknown][]; service?: (ctx: ServiceContext) => unknown }): Loaded {
+	const calls = new Map(opts.hooks ?? []);
+	return {
+		name,
+		dir: "",
+		handler: "",
+		hooks: new Map([...calls.keys()].map((h) => [h, { blocking: true, timeout_ms: 5000 }])),
+		service: !!opts.service,
+		requires_env: [],
+		config: { from: name },
+		call: (i: HookInput) => calls.get(i.event)?.(i),
+		run: opts.service,
+	} as unknown as Loaded;
+}
+
+function session(t: TestContext, exts: Loaded[]) {
+	const lines: string[] = [];
+	t.mock.method(console, "log", (line: string) => { lines.push(line); });
+	t.mock.method(globalThis, "fetch", async () => reply("hello"));
+	const { ws, app } = fakeSocket();
+	const hub = fakeHub();
+	runSession(ws as unknown as WebSocket, character, exts, hub);
+	const logged = (text: string) => lines.some((l) => l.includes(text));
+	return {
+		app,
+		hub,
+		logged,
+		close: async () => {
+			ws.emit("close");
+			await until(() => logged("closed:"), "the session to close", 4000);
+		},
+	};
+}
+
+test("a service starts after on_session_start, its ext reaches the hooks, and an accepted offer is a turn that names it", async (t) => {
+	const order: string[] = [];
+	let ctx: ServiceContext | undefined;
+	let outcome: Promise<string> | undefined;
+	const seen: State[] = [];
+	const twitch = extension("twitch", {
+		hooks: [
+			["on_session_start", () => { order.push("on_session_start"); }],
+			["before_llm", (i) => { seen.push(i.state); }],
+		],
+		service: async (c) => {
+			order.push("service");
+			ctx = c;
+			c.ext.set({ chat: ["@ana: hi"] });
+			outcome = c.offer({ text: "@ana asked: hi?", source: "chat", quiet_ms: 0 });
+			await new Promise((r) => c.signal.addEventListener("abort", r));
+			order.push("stopped");
+		},
+	});
+	const s = session(t, [twitch]);
+	await until(() => ctx !== undefined, "the service");
+	assert.deepEqual(order, ["on_session_start", "service"]);
+	assert.deepEqual(ctx!.config, { from: "twitch" });
+	assert.deepEqual(ctx!.ext.get(), { chat: ["@ana: hi"] });
+	assert.equal(ctx!.voice.state, "offline");
+
+	const voices: string[] = [];
+	ctx!.voice.on((v) => voices.push(v));
+	s.hub.player({ t: "status", voice: "idle", epoch: 0 });
+	assert.equal(ctx!.voice.state, "idle");
+	await until(() => s.hub.offers().length === 1, "the offer");
+	s.hub.player({ t: "ack", id: 1, accepted: true });
+	assert.equal(await outcome, "accepted");
+	assert.deepEqual(voices, ["idle"]);
+
+	// the player injects the offer as the user's turn
+	s.app({ t: "llm", id: 1, history: [{ role: "user", content: "@ana asked: hi?" }] });
+	await until(() => seen.length === 1, "before_llm");
+	assert.deepEqual(seen[0].input, { text: "@ana asked: hi?", channel: "chat", offered_by: "twitch" });
+	assert.deepEqual(seen[0].ext.twitch, { chat: ["@ana: hi"] });
+	await until(() => s.logged("turn 1: replied"), "the reply");
+
+	// a turn the user started is a voice turn, and sees the service's latest write
+	ctx!.ext.set({ chat: ["@bia: yo"] });
+	s.app({ t: "llm", id: 2, history: [{ role: "user", content: "hey" }] });
+	await until(() => seen.length === 2, "the second before_llm");
+	assert.deepEqual(seen[1].input, { text: "hey", channel: "voice" });
+	assert.deepEqual(seen[1].ext.twitch, { chat: ["@bia: yo"] });
+
+	await s.close();
+	assert.equal(ctx!.signal.aborted, true);
+	assert.deepEqual(order, ["on_session_start", "service", "stopped"]);
+});
+
+test("a service write made while before_llm runs is kept", async (t) => {
+	let ctx: ServiceContext | undefined;
+	let release = () => {};
+	const held = new Promise<void>((r) => { release = r; });
+	const finals: unknown[] = [];
+	const svc = extension("svc", {
+		hooks: [
+			["before_llm", async (i) => { await held; return { state: { ...i.state, ext: { ...i.state.ext, other: 1 } } }; }],
+			["after_llm", (i) => { finals.push(i.state.ext); }],
+		],
+		service: async (c) => {
+			ctx = c;
+			await new Promise((r) => c.signal.addEventListener("abort", r));
+		},
+	});
+	const s = session(t, [svc]);
+	await until(() => ctx !== undefined, "the service");
+	s.app({ t: "llm", id: 1, history: [{ role: "user", content: "hey" }] });
+	await pause(10);
+	ctx!.ext.set("written meanwhile");
+	release();
+	await until(() => finals.length === 1, "after_llm");
+	assert.deepEqual(finals[0], { svc: "written meanwhile", other: 1 });
+	await s.close();
+});
+
+test("a service that fails is started again", async (t) => {
+	let runs = 0;
+	const s = session(t, [
+		extension("flaky", {
+			service: async (c) => {
+				if (++runs === 1) throw new Error("boom");
+				await new Promise((r) => c.signal.addEventListener("abort", r));
+			},
+		}),
+	]);
+	await until(() => runs === 2, "the second run", 3000);
+	assert.ok(s.logged("flaky service failed: boom; starting it again in 1s"));
+	await s.close();
+});

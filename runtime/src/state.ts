@@ -30,7 +30,8 @@ export interface State {
 	schema: number;
 	character: Record<string, unknown>;
 	session: { id: string; channel: string; end_reason?: string };
-	input?: { text: string; channel: string };
+	// `offered_by`: the extension whose offer this turn is, when it is one
+	input?: { text: string; channel: string; offered_by?: string };
 	messages?: Message[];
 	prompt?: string;
 	reply?: string;

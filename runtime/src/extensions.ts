@@ -6,7 +6,9 @@
 //
 // A module handler is a file whose default export is that function, sync or
 // async. It may also export `check({ config, body })`, which `npm run check`
-// and `npm start` call to check its config against the character (check.ts).
+// and `npm start` call to check its config against the character (check.ts),
+// and, when its extension.yaml says `service: true`, `service(ctx)`, which runs
+// for the whole session beside the hooks (session.ts).
 // An HTTP handler gets the same object as a JSON POST and answers the
 // same way. Keys come from .env, which the runtime loads into process.env.
 
@@ -14,6 +16,7 @@ import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Body, Problems } from "./check.ts";
 import type { Extension } from "./manifest.ts";
+import type { OfferOutcome, OfferRequest, VoiceState } from "./offers.ts";
 import type { HookName, State } from "./state.ts";
 
 export interface HookInput {
@@ -26,9 +29,30 @@ type Handler = (input: HookInput) => HookOutput | Promise<HookOutput>;
 
 type Check = (input: { config: unknown; body: Body }) => Problems | void | Promise<Problems | void>;
 
+// What a service gets: the session it runs in, a way to keep its data where the
+// hooks see it, a way to start a turn, and the player's voice.
+export interface ServiceContext {
+	config: unknown;
+	session: { id: string; channel: string };
+	signal: AbortSignal; // aborted when the session ends
+	log: (line: string) => void;
+	ext: {
+		get(): unknown; // a copy of state.ext.<name>
+		set(value: unknown): void; // replaces state.ext.<name>; the next hook sees it
+	};
+	offer(req: OfferRequest): Promise<OfferOutcome>;
+	voice: {
+		readonly state: VoiceState;
+		readonly since: number; // Date.now() when `state` last changed
+		on(fn: (state: VoiceState) => void): () => void; // returns the unsubscribe
+	};
+}
+type Service = (ctx: ServiceContext) => unknown;
+
 export interface Loaded extends Extension {
 	call: Handler;
 	check?: Check;
+	run?: Service;
 }
 
 class TimedOut extends Error {}
@@ -54,10 +78,18 @@ export async function loadExtensions(exts: Extension[]): Promise<Loaded[]> {
 			continue;
 		}
 		const file = path.join(e.dir, e.handler);
-		const mod = (await import(pathToFileURL(file).href)) as { default?: unknown; check?: unknown };
-		if (typeof mod.default !== "function")
+		const mod = (await import(pathToFileURL(file).href)) as { default?: unknown; check?: unknown; service?: unknown };
+		// a service-only extension has no hooks, so it needs no default export
+		if (typeof mod.default !== "function" && (e.hooks.size || !e.service))
 			throw new Error(`${file}: the extension's handler must export a default function`);
-		out.push({ ...e, call: mod.default as Handler, check: typeof mod.check === "function" ? (mod.check as Check) : undefined });
+		if (e.service && typeof mod.service !== "function")
+			throw new Error(`${file}: extension.yaml says \`service: true\`, so the handler must export a \`service\` function`);
+		out.push({
+			...e,
+			call: typeof mod.default === "function" ? (mod.default as Handler) : () => undefined,
+			check: typeof mod.check === "function" ? (mod.check as Check) : undefined,
+			run: e.service ? (mod.service as Service) : undefined,
+		});
 	}
 	return out;
 }
