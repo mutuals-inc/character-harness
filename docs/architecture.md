@@ -47,7 +47,7 @@ Either way the app gets the same silent reply.
 | `on_session_start` | a session opens | `character`, `session` | prefetch memories, open a gamification session |
 | `before_reply` | input arrived; runs alongside `before_llm` and the LLM call | `input`, `messages` | the gate (reply or stay quiet), moderation that cancels the turn |
 | `before_llm` | the prompt is being built | `input`, `messages`, `prompt` | memory recall, context injection, blocking a topic |
-| `after_llm` | the full reply is written; early sentences may already be playing | `+ reply` | observability spans, logging the reply |
+| `after_llm` | the full reply is written (a silent reply is cut off at the token); early sentences may already be playing | `+ reply` | observability spans, logging the reply |
 | `on_sentence` | per sentence, while TTS synthesizes it | `+ sentence`, `beats` | staging: emotion, gesture, camera |
 | `on_speak` | a sentence's audio and timing are ready | `sentence` + `timing` | sync expressions to the audio |
 | `after_turn` | the turn is closed | everything | memory writes, metrics, rewards, transcripts, eval data |
@@ -95,8 +95,8 @@ models:
 
 - The runtime sends `prompt` as the system message, then `messages`. It streams the answer into sentences for `on_sentence` and writes the full text to `reply`.
 - On failure the runtime sets `error` and ends the turn. `after_turn` still fires.
-- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is what the model wrote. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
-- The runtime never tells the model about `silent_reply`. The character's prompt says when to answer it. The app keeps a silent reply in the history as `…`, and the runtime turns it back into the token before the model sees it.
+- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is what had arrived when the model was stopped. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
+- The runtime never tells the model about `silent_reply`. The character's prompt says when to answer it. The app keeps a silent reply in the history as `…`, and the runtime turns it back into the token before the model sees it. That includes turns an extension cancelled, so the model sees those as its own silent replies too.
 
 ## The voice
 

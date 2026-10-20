@@ -292,6 +292,47 @@ function streamed(parts: string[], signal?: AbortSignal): Response {
 	);
 }
 
+// A reply the test writes a part at a time with `say`, and ends with `end`.
+// The body is asked for its next part only once the runtime has handled the
+// last one, so `handled(n)` says the runtime has taken in the first n parts.
+function scripted() {
+	const enc = new TextEncoder();
+	const parts: (string | null)[] = [];
+	let wake = () => {};
+	let pulls = 0;
+	return {
+		say(text: string) { parts.push(text); wake(); },
+		end() { parts.push(null); wake(); },
+		handled: (n: number) => pulls > n,
+		body(signal: AbortSignal): Response {
+			return new Response(
+				new ReadableStream(
+					{
+						async pull(c) {
+							pulls++;
+							while (!parts.length) {
+								if (signal.aborted) return c.error(new DOMException("aborted", "AbortError"));
+								await new Promise<void>((r) => {
+									wake = r;
+									signal.addEventListener("abort", () => r(), { once: true });
+								});
+							}
+							const p = parts.shift();
+							if (p == null) {
+								c.enqueue(enc.encode("data: [DONE]\n\n"));
+								c.close();
+								return;
+							}
+							c.enqueue(enc.encode(`data: ${JSON.stringify({ choices: [{ delta: { content: p } }] })}\n\n`));
+						},
+					},
+					{ highWaterMark: 0 },
+				),
+			);
+		},
+	};
+}
+
 const silentTurn = [
 	{ t: "llm_delta", id: 5, text: "…" },
 	{ t: "llm_done", id: 5 },
@@ -330,6 +371,38 @@ test("a reply that starts like the silent reply and then differs goes out whole,
 	await s.close();
 });
 
+test("a reply that differs from the silent reply goes out at once, while the model still writes", async (t) => {
+	const m = scripted();
+	const s = session(t, (_n, signal) => m.body(signal), [], quiet);
+	s.app({ t: "llm", id: 5, history });
+	m.say("[");
+	m.say("teas");
+	await until(() => s.sentFor(5).length === 2, "the text to go out");
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[" },
+		{ t: "llm_delta", id: 5, text: "teas" },
+	]);
+	m.end();
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	await s.close();
+});
+
+test("before_reply letting the reply through does not release the start of the silent reply", async (t) => {
+	const held = gate();
+	const m = scripted();
+	const s = session(t, (_n, signal) => m.body(signal), [hook("before_reply", () => held.shut)], quiet);
+	s.app({ t: "llm", id: 5, history });
+	m.say("[pa");
+	await until(() => m.handled(1), "the start of the reply");
+	held.open();
+	// before_reply has decided by the time the next part is handled
+	await new Promise((r) => setImmediate(r));
+	m.say("ss]");
+	await until(() => s.logged("turn 5: silent reply"), "the turn to end");
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	await s.close();
+});
+
 test("a reply that ends partway into the silent reply is sent, not swallowed", async (t) => {
 	const s = session(t, () => streamed(["[pa"]), [], quiet);
 	s.app({ t: "llm", id: 5, history });
@@ -339,11 +412,19 @@ test("a reply that ends partway into the silent reply is sent, not swallowed", a
 });
 
 test("text after the silent reply is not sent, and the model is stopped", async (t) => {
-	const s = session(t, (_n, signal) => streamed(["[pass] but", " actually"], signal), [], quiet);
+	let seen = "";
+	const s = session(
+		t,
+		(_n, signal) => streamed(["[pass] but", " actually"], signal),
+		[hook("after_llm", ({ state }) => { seen = String(state.reply); })],
+		quiet,
+	);
 	s.app({ t: "llm", id: 5, history });
 	await until(() => s.logged("turn 5: silent reply"), "the turn to end");
 	assert.equal(s.calls[0].aborted, true);
 	assert.deepEqual(s.sentFor(5), silentTurn);
+	// what had arrived when the model was stopped
+	assert.equal(seen, "[pass] but");
 	await s.close();
 });
 
@@ -360,10 +441,11 @@ test("a reply that is only the silent reply is not llm_empty, but an empty one s
 
 test("a silent reply while before_reply cancels ends the turn once, as a cancelled turn", async (t) => {
 	const held = gate();
+	const m = scripted();
 	let after = 0;
 	const s = session(
 		t,
-		() => reply("[pass]"),
+		(_n, signal) => m.body(signal),
 		[
 			hook("before_reply", async ({ state }) => {
 				await held.shut;
@@ -374,7 +456,8 @@ test("a silent reply while before_reply cancels ends the turn once, as a cancell
 		quiet,
 	);
 	s.app({ t: "llm", id: 5, history });
-	await until(() => s.calls.length === 1, "the model to answer");
+	m.say("[pass]");
+	await until(() => s.calls.length === 1 && s.calls[0].aborted, "the model to be stopped at the token");
 	held.open();
 	await until(() => s.logged("turn 5: cancelled"), "the turn to end");
 	assert.deepEqual(s.sentFor(5), silentTurn);
@@ -387,12 +470,16 @@ test("the app's … in the history goes to the model as the silent reply", async
 	const past = [
 		{ role: "user", content: "talking to someone else" },
 		{ role: "assistant", content: "…" },
+		{ role: "user", content: "…" },
+		{ role: "assistant", content: " …\n" },
 		{ role: "user", content: "hi" },
 	];
 	s.app({ t: "llm", id: 5, history: past });
 	await until(() => s.logged("turn 5: replied"), "the reply");
 	const sent = s.bodies[0].messages as { role: string; content: string }[];
-	assert.deepEqual(sent.slice(1), [past[0], { role: "assistant", content: "[pass]" }, past[2]]);
+	const pass = { role: "assistant", content: "[pass]" };
+	// only the character's own lines are its silent replies
+	assert.deepEqual(sent.slice(1), [past[0], pass, past[2], pass, past[4]]);
 	await s.close();
 });
 
@@ -416,12 +503,15 @@ test("without silent_reply, the token is an ordinary reply and … stays as it i
 test("a reply held by before_reply and by the silent reply goes out once both let it", async (t) => {
 	const held = gate();
 	let runs = 0;
-	const s = session(t, () => streamed(["[pa", "use] ok"]), [hook("before_reply", () => { runs++; return held.shut; })], quiet);
+	const m = scripted();
+	const s = session(t, (_n, signal) => m.body(signal), [hook("before_reply", () => { runs++; return held.shut; })], quiet);
 	s.app({ t: "llm", id: 5, history });
-	await until(() => runs === 1 && s.calls.length === 1, "the reply to be held");
-	await new Promise((r) => setTimeout(r, 5));
+	m.say("[pa");
+	m.say("use] ok");
+	await until(() => runs === 1 && m.handled(2), "the reply to be held");
 	assert.deepEqual(s.sentFor(5), []);
 	held.open();
+	m.end();
 	await until(() => s.logged("turn 5: replied"), "the reply");
 	assert.deepEqual(s.sentFor(5), [
 		{ t: "llm_delta", id: 5, text: "[pa" },
