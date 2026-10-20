@@ -66,10 +66,12 @@ The player decides whether an offer becomes a turn, because only it knows whethe
 |---|---|---|
 | `{t:"status", voice, epoch}` | app to runtime | when the link opens, and whenever `voice` or `epoch` changes. `voice` is `idle`, `listening`, `thinking`, `speaking` or `offline` (the session socket is down) |
 | `{t:"offer", id, epoch, text}` | runtime to app | a line to take as the user's turn. `epoch` is the one from the last status the runtime saw |
-| `{t:"ack", id, accepted}` | app to runtime | the answer to an offer, within 2 s. Past that the runtime treats it as refused |
+| `{t:"ack", id, accepted}` | app to runtime | the answer to an offer, within 2 s. Past that the runtime treats it as refused, but an `accepted` that comes later still counts |
 
-The player bumps `epoch` every time its voice leaves `idle`, and refuses an offer whose `epoch` isn't its current one, or that arrives while its voice isn't idle. So when someone starts speaking while an offer is on its way, the player refuses it, since the runtime decided it while the voice was still quiet.
+The player bumps `epoch` every time its voice leaves `idle`, and right after it takes an offer. It refuses an offer whose `epoch` isn't its current one, or that arrives while its voice isn't idle. So when someone starts speaking while an offer is on its way, the player refuses it, since the runtime decided it while the voice was still quiet. And two offers that arrive together can't both be taken.
 
-After a refusal the runtime sends nothing until the next status. After an `accepted`, it sends nothing until the voice has left `idle` (the offer's turn started) or 5 s have passed.
+After a refusal the runtime sends nothing until the next status, unless a newer status than the one the refusal was decided against has already come in. The player sends a status after every refusal, even when nothing changed. After an `accepted`, the runtime sends nothing until the voice has left `idle` (the offer's turn started) or 5 s have passed.
+
+The runtime keeps the last status, so a session socket that reconnects while the link stays up knows the voice at once. If the link drops between the player taking an offer and the runtime reading the ack, the offer's `llm` still settles it: the runtime matches the turn's user line against the offers it has sent.
 
 A player without the link still works. Its voice reads `offline` to services, and offers wait until they expire.

@@ -8,6 +8,7 @@
 
 #define PLAYER_OFFERS_PATH "/offers"
 #define PLAYER_OFFERS_RETRY 2.0f // seconds between connection attempts
+#define PLAYER_OFFERS_CONNECT_MAX 5.0f // seconds a connection attempt may take
 #define PLAYER_OFFERS_MSG_MAX 128u
 
 void player_offers_init(PlayerOffers *o, CString session_url) {
@@ -109,12 +110,19 @@ hz_internal void player_offers_take(PlayerOffers *o, CharacterVoice *vs,
   player_offers_ack(o, (u32)id, accept);
   if (!accept) {
     o->refused++;
+    // the runtime waits for a status after a refusal; this one says where the
+    // player is now, even if nothing changed since the last
+    o->sent_voice = NULL;
     log_info("offers: offer % refused", fmt_u32((u32)id));
     return;
   }
   o->accepted++;
   log_info("offers: offer % taken as a turn", fmt_u32((u32)id));
   character_voice_inject_user_text(vs, text, cstr_len(text));
+  // the voice may only leave idle on the next tick; until then, nothing else
+  // offered against this epoch, in this frame or after, may land too
+  o->epoch++;
+  o->was_idle = false;
 }
 
 void player_offers_tick(PlayerOffers *o, CharacterVoice *vs, f32 dt) {
@@ -130,8 +138,12 @@ void player_offers_tick(PlayerOffers *o, CharacterVoice *vs, f32 dt) {
 
   if (o->ws) {
     OsWsState state = os_ws_state(o->ws);
-    if (state == OS_WS_CONNECTING)
-      return;
+    if (state == OS_WS_CONNECTING) {
+      o->connect_t += dt;
+      if (o->connect_t < PLAYER_OFFERS_CONNECT_MAX)
+        return;
+      state = OS_WS_ERROR; // a handshake that never finishes is a failed one
+    }
     if (state != OS_WS_OPEN) {
       // there is no os_ws_release beside it, so close is what hands it back
       os_ws_close(o->ws);
@@ -150,6 +162,7 @@ void player_offers_tick(PlayerOffers *o, CharacterVoice *vs, f32 dt) {
     if (o->retry_t > 0.0f)
       return;
     o->retry_t = PLAYER_OFFERS_RETRY;
+    o->connect_t = 0.0f;
     o->ws = os_ws_connect(&(OsWsConfig){.url = o->url});
     return;
   }

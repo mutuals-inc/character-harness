@@ -143,4 +143,5 @@ test("dead-air's check refuses times that aren't seconds above 0", () => {
 	assert.match(deadAirCheck({ config: { after_s: 0 } }).errors.join(), /after_s/);
 	assert.match(deadAirCheck({ config: { cooldown_s: "1" as never } }).errors.join(), /cooldown_s/);
 	assert.match(deadAirCheck({ config: { text: " " } }).errors.join(), /text/);
+	assert.match(deadAirCheck({ config: { text: "x".repeat(4001) } }).errors.join(), /4000/);
 });

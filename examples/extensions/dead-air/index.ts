@@ -46,7 +46,7 @@ export function check({ config }: { config: Config }) {
 		const v = config[k];
 		if (v !== undefined && (typeof v !== "number" || !(v > 0))) errors.push(`\`${k}\` must be a number of seconds above 0`);
 	}
-	if (config.text !== undefined && (typeof config.text !== "string" || !config.text.trim()))
-		errors.push("`text` must be some text");
+	if (config.text !== undefined && (typeof config.text !== "string" || !config.text.trim() || config.text.length > 4000))
+		errors.push("`text` must be some text, up to 4000 characters");
 	return { errors };
 }

@@ -91,7 +91,7 @@ export async function service({ config, session, signal, log, ext, offer, voice 
 | `voice.since` | `Date.now()` when `voice.state` last changed |
 | `voice.on(fn)` | calls `fn(state)` on every change; returns the function that stops it |
 
-The runtime starts each service just after `on_session_start`. When the session ends it aborts `signal`, waits up to 2 seconds for the services to return, then runs `on_session_end`. A service that throws is logged and started again, after a wait that doubles from 1 second up to 30. One that returns is done, and is not started again.
+The runtime starts each service just after `on_session_start`. When the session ends it aborts `signal`, waits up to 2 seconds for the services to return, then runs `on_session_end`. A service that throws is logged and started again, after a wait that doubles from 1 second up to 30. One that returns is done, and is not started again. Either way, when a run ends its `signal` is aborted and its `voice.on` listeners are removed, so a service that only reacts to the voice keeps running until `signal` fires.
 
 A service writes only its own `ext.<name>`. To give a hook something to put in the prompt, the service writes it there and the hook reads `state.ext.<name>`. To learn what happened in a turn, a hook of the same extension writes it there and the service reads it with `ext.get()`.
 
@@ -105,13 +105,13 @@ const outcome = await offer({ text: "@ana asked in chat: are you a cat?", source
 
 | Key | Default | What |
 |---|---|---|
-| `text` | required | the user's side of the turn, up to 4000 characters. The character answers it; it is not said as written |
+| `text` | required | the user's side of the turn, up to 4000 characters, with no control characters other than newlines and tabs. The character answers it; it is not said as written |
 | `source` | `offer` | the turn's `input.channel`, a lowercase word like `chat`, `screen` or `idle` |
-| `quiet_ms` | `2000` | how long the voice must have been idle before the offer goes out, so the character doesn't take the floor the moment it stops |
-| `ttl_ms` | `10000` | how long the offer may wait. Past it, the offer resolves `expired` |
+| `quiet_ms` | `2000` | how long the voice must have been idle before the offer goes out, so the character doesn't take the floor the moment it stops. At most a day |
+| `ttl_ms` | `10000` | how long the offer may wait. Past it, the offer resolves `expired`. At most a day |
 | `priority` | `0` | higher goes first; among equals, the oldest |
 
-The runtime keeps a queue per session and hands one offer at a time to the player, only while its voice is idle. After the player takes one, nothing else goes out until that turn has started. If the player refuses one because someone just started speaking, it goes back in the queue and waits for the next quiet moment. A taken offer is an ordinary turn. The player sends it back as the user's line, and its `input` has `channel` set to the offer's `source` and `offered_by` set to the extension's name.
+The runtime keeps a queue per session and hands one offer at a time to the player, only while its voice is idle. After the player takes one, nothing else goes out until that turn has started, or the voice has stayed idle for 5 s more. If the player refuses one because someone just started speaking, it goes back in the queue and waits for the next quiet moment. A taken offer is an ordinary turn. The player sends it back as the user's line, and its `input` has `channel` set to the offer's `source` and `offered_by` set to the extension's name.
 
 `offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
 

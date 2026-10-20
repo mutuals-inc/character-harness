@@ -19,13 +19,13 @@ import { existsSync, readFileSync } from "node:fs";
 import { createServer } from "node:http";
 import { parseEnv } from "node:util";
 import path from "node:path";
-import WebSocket, { WebSocketServer } from "ws";
+import { WebSocketServer } from "ws";
 import { checkCharacter, printable, printReport, shortPath } from "./check.ts";
 import { loadExtensions } from "./extensions.ts";
 import { ManifestError, loadCharacter, requiredKeys } from "./manifest.ts";
 import { manualStart, playerLog, startPlayer, type PlayerLaunch } from "./player.ts";
 import { runSession } from "./session.ts";
-import type { LinkHub } from "./offers.ts";
+import { LinkServer } from "./offers.ts";
 
 function fail(message: string): never {
 	console.error(printable(message));
@@ -106,43 +106,8 @@ server.on("upgrade", (req, socket, head) => {
 
 // The player keeps one offers link, and a newer one replaces it. Every session
 // hears it, so the link outlives a session socket that reconnects.
-let link: WebSocket | null = null;
-let offerIds = 0;
-const listeners = new Set<Parameters<LinkHub["subscribe"]>[0]>();
-const hub: LinkHub = {
-	isOpen: () => link?.readyState === WebSocket.OPEN,
-	send: (obj) => {
-		if (link?.readyState !== WebSocket.OPEN) return false;
-		link.send(JSON.stringify(obj));
-		return true;
-	},
-	nextId: () => ++offerIds,
-	subscribe: (fn) => {
-		listeners.add(fn);
-		return () => listeners.delete(fn);
-	},
-};
-const tell = (m: Parameters<Parameters<LinkHub["subscribe"]>[0]>[0]) => { for (const fn of [...listeners]) fn(m); };
-links.on("connection", (ws) => {
-	if (link) link.close(1000, "replaced by a newer link");
-	link = ws;
-	tell("open");
-	ws.on("message", (data, isBinary) => {
-		if (isBinary || link !== ws) return;
-		try {
-			const msg = JSON.parse(data.toString());
-			if (msg && typeof msg === "object" && !Array.isArray(msg)) tell(msg);
-		} catch {
-			// not JSON: not for us
-		}
-	});
-	ws.on("close", () => {
-		if (link !== ws) return;
-		link = null;
-		tell("closed");
-	});
-	ws.on("error", () => ws.close());
-});
+const hub = new LinkServer();
+links.on("connection", (ws) => hub.attach(ws));
 wss.on("connection", (ws) => runSession(ws, character, extensions, hub));
 const listenFailed = (e: Error) => fail(`could not listen on ${host}:${port}: ${e.message}`);
 server.on("error", listenFailed);

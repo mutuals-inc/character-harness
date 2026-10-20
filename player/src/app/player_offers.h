@@ -18,6 +18,7 @@ typedef struct {
   OsWebSocket *ws;
   b32 open;
   f32 retry_t;
+  f32 connect_t; // how long the attempt in progress has taken
   char url[PLAYER_ENV_MAX + 8];
 
   u32 epoch;

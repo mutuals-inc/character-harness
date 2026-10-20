@@ -30,7 +30,9 @@ export type OfferOutcome = "accepted" | "expired" | "closed";
 export const OFFER_TTL_MS = 10_000;
 export const OFFER_QUIET_MS = 2000;
 export const OFFER_TEXT_MAX = 4000;
-// how long the player has to answer an offer before it goes back in the queue
+// the longest an offer may wait, or ask the voice to be quiet: a day
+export const OFFER_WAIT_MAX_MS = 86_400_000;
+// how long the player has to answer an offer before it counts as refused
 export const OFFER_ACK_MS = 2000;
 // after an accepted offer, how long the voice may stay idle before the runtime
 // gives up waiting for its turn to start and offers again
@@ -44,7 +46,75 @@ export interface LinkHub {
 	isOpen(): boolean;
 	send(obj: unknown): boolean;
 	nextId(): number;
-	subscribe(fn: (msg: Record<string, unknown> | "open" | "closed") => void): () => void;
+	// `fn` hears every message from the player; it is told the last status at
+	// once, so a session that starts while the link is up knows the voice
+	subscribe(fn: (msg: LinkMessage) => void): () => void;
+}
+export type LinkMessage = Record<string, unknown> | "open" | "closed";
+
+// The minimum of a WebSocket the link uses, so tests can hand it a fake one.
+interface LinkSocket {
+	readonly readyState: number;
+	send(data: string): void;
+	close(code?: number, reason?: string): void;
+	on(event: "message", fn: (data: unknown, isBinary: boolean) => void): unknown;
+	on(event: "close" | "error", fn: () => void): unknown;
+}
+const OPEN = 1; // WebSocket.OPEN
+
+// The runtime's end of the link. One at a time: a newer one replaces the old.
+export class LinkServer implements LinkHub {
+	private link: LinkSocket | null = null;
+	private ids = 0;
+	private last: Record<string, unknown> | null = null;
+	private listeners = new Set<(m: LinkMessage) => void>();
+
+	attach(ws: LinkSocket): void {
+		if (this.link) this.link.close(1000, "replaced by a newer link");
+		this.link = ws;
+		this.last = null;
+		this.tell("open");
+		ws.on("message", (data, isBinary) => {
+			if (isBinary || this.link !== ws) return;
+			let msg: unknown;
+			try {
+				msg = JSON.parse(String(data));
+			} catch {
+				return; // not JSON: not for us
+			}
+			if (!msg || typeof msg !== "object" || Array.isArray(msg)) return;
+			const m = msg as Record<string, unknown>;
+			if (m.t === "status") this.last = m;
+			this.tell(m);
+		});
+		ws.on("close", () => {
+			if (this.link !== ws) return;
+			this.link = null;
+			this.last = null;
+			this.tell("closed");
+		});
+		ws.on("error", () => ws.close());
+	}
+
+	isOpen(): boolean {
+		return this.link?.readyState === OPEN;
+	}
+	send(obj: unknown): boolean {
+		if (!this.link || this.link.readyState !== OPEN) return false;
+		this.link.send(JSON.stringify(obj));
+		return true;
+	}
+	nextId(): number {
+		return ++this.ids;
+	}
+	subscribe(fn: (m: LinkMessage) => void): () => void {
+		this.listeners.add(fn);
+		if (this.last) fn(this.last);
+		return () => { this.listeners.delete(fn); };
+	}
+	private tell(m: LinkMessage): void {
+		for (const fn of [...this.listeners]) fn(m);
+	}
 }
 
 // What the turn that an accepted offer became should say about itself.
@@ -60,16 +130,25 @@ interface Pending {
 	by: string;
 	at: number;
 	done: (o: OfferOutcome) => void;
-	id?: number; // set while it waits for the player's ack
+	ids: number[]; // every id it went out under: a late ack names an old one
+	epoch: number; // the epoch it last went out with
 }
+
+// control characters other than a newline or a tab
+const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
 export function checkOffer(req: OfferRequest): void {
 	if (!req || typeof req.text !== "string" || !req.text.trim()) throw new Error("an offer needs some `text`");
 	if (req.text.length > OFFER_TEXT_MAX) throw new Error(`an offer's text is at most ${OFFER_TEXT_MAX} characters`);
+	if (CONTROL.test(req.text)) throw new Error("an offer's text may not have control characters other than newlines and tabs");
 	if (req.source !== undefined && (typeof req.source !== "string" || !/^[a-z][a-z0-9_-]*$/.test(req.source)))
 		throw new Error("an offer's `source` is a lowercase word, like chat or screen");
-	for (const k of ["ttl_ms", "quiet_ms", "priority"] as const)
-		if (req[k] !== undefined && !Number.isFinite(req[k])) throw new Error(`an offer's \`${k}\` must be a number`);
+	if (req.priority !== undefined && !Number.isFinite(req.priority)) throw new Error("an offer's `priority` must be a number");
+	for (const k of ["ttl_ms", "quiet_ms"] as const) {
+		const v = req[k];
+		if (v !== undefined && (typeof v !== "number" || !(v >= 0 && v <= OFFER_WAIT_MAX_MS)))
+			throw new Error(`an offer's \`${k}\` must be a number of milliseconds from 0 to ${OFFER_WAIT_MAX_MS}`);
+	}
 }
 
 // One session's offers, and what it knows of the player's voice.
@@ -83,12 +162,12 @@ export class Offers {
 	private wake: ReturnType<typeof setTimeout> | undefined;
 	// an accepted offer whose turn has not started: nothing else goes out
 	private claimed = 0;
-	// the player refused an offer: what it knows has moved on, so nothing goes
-	// out again until its next status says what
+	// the player refused an offer, or never answered, while nothing newer was
+	// known: nothing goes out again until its next status says what changed
 	private stale = false;
 	private accepted: Accepted[] = [];
 	private listeners = new Set<(v: VoiceState) => void>();
-	private unsubscribe: () => void;
+	private unsubscribe: () => void = () => {};
 	private closed = false;
 	private hub: LinkHub | undefined;
 	private log: (line: string) => void;
@@ -96,12 +175,12 @@ export class Offers {
 	constructor(hub: LinkHub | undefined, log: (line: string) => void) {
 		this.hub = hub;
 		this.log = log;
-		this.unsubscribe = hub ? hub.subscribe((m) => this.onLink(m)) : () => {};
+		if (hub) this.unsubscribe = hub.subscribe((m) => this.onLink(m));
 	}
 
 	onVoice(fn: (v: VoiceState) => void): () => void {
 		this.listeners.add(fn);
-		return () => this.listeners.delete(fn);
+		return () => { this.listeners.delete(fn); };
 	}
 
 	offer(req: OfferRequest, by: string): Promise<OfferOutcome> {
@@ -119,19 +198,26 @@ export class Offers {
 				by,
 				at: Date.now(),
 				done,
+				ids: [],
+				epoch: 0,
 			});
 			this.pump();
 		});
 	}
 
 	// The accepted offer an `llm` turn came from, if its user line is one: the
-	// player sends the offer's text back as the user's turn.
+	// player sends the offer's text back as the user's turn. An offer still
+	// waiting with that text was taken too, its ack lost on a link that dropped.
 	take(lastUser: string): Accepted | undefined {
+		const text = lastUser.trim();
 		const now = Date.now();
 		this.accepted = this.accepted.filter((a) => now - a.at < ACCEPTED_KEEP_MS);
-		const i = this.accepted.findIndex((a) => a.text === lastUser.trim());
-		if (i < 0) return undefined;
-		return this.accepted.splice(i, 1)[0];
+		const i = this.accepted.findIndex((a) => a.text === text);
+		if (i >= 0) return this.accepted.splice(i, 1)[0];
+		const waiting = [...(this.inFlight ? [this.inFlight] : []), ...this.queue].find((p) => p.ids.length && p.req.text === text);
+		if (!waiting) return undefined;
+		this.settle(waiting);
+		return this.accepted.pop();
 	}
 
 	close(): void {
@@ -153,21 +239,40 @@ export class Offers {
 		this.since = Date.now();
 		// the offer's turn has started; once it is over, offers may go out again
 		if (v !== "idle") this.claimed = 0;
+		const failed = (e: unknown) =>
+			this.log(`[offers] a voice listener failed: ${e instanceof Error ? e.message : String(e)}`);
 		for (const fn of [...this.listeners]) {
 			try {
-				fn(v);
+				const r: unknown = fn(v);
+				if (r instanceof Promise) r.catch(failed);
 			} catch (e) {
-				this.log(`[offers] a voice listener failed: ${e instanceof Error ? e.message : String(e)}`);
+				failed(e);
 			}
 		}
 	}
 
-	private onLink(m: Record<string, unknown> | "open" | "closed"): void {
+	// The player took `p`: it leaves the queue and waits for its turn.
+	private settle(p: Pending): void {
+		if (p === this.inFlight) {
+			this.inFlight = null;
+			clearTimeout(this.ackTimer);
+		} else {
+			const i = this.queue.indexOf(p);
+			if (i >= 0) this.queue.splice(i, 1);
+		}
+		this.log(`[offers] ${p.by}: accepted "${p.req.text.slice(0, 60)}"`);
+		this.claimed = Date.now();
+		this.accepted.push({ text: p.req.text, source: p.req.source, by: p.by, at: Date.now() });
+		p.done("accepted");
+	}
+
+	private onLink(m: LinkMessage): void {
 		if (this.closed) return;
 		if (m === "open") return;
 		if (m === "closed") {
 			this.requeue();
 			this.setVoice("offline");
+			this.pump();
 			return;
 		}
 		if (m.t === "status") {
@@ -178,29 +283,27 @@ export class Offers {
 			this.pump();
 			return;
 		}
-		if (m.t === "ack" && this.inFlight && m.id === this.inFlight.id) {
-			const p = this.inFlight;
-			this.inFlight = null;
-			clearTimeout(this.ackTimer);
-			if (m.accepted === true) {
-				this.log(`[offers] ${p.by}: accepted "${p.req.text.slice(0, 60)}"`);
-				this.claimed = Date.now();
-				this.accepted.push({ text: p.req.text, source: p.req.source, by: p.by, at: Date.now() });
-				p.done("accepted");
-			} else {
-				// refused: someone spoke first. It waits for the next quiet moment.
-				p.id = undefined;
-				this.stale = true;
-				this.queue.push(p);
-			}
-			this.pump();
+		if (m.t !== "ack" || !Number.isSafeInteger(m.id)) return;
+		const id = m.id as number;
+		const p = [...(this.inFlight ? [this.inFlight] : []), ...this.queue].find((q) => q.ids.includes(id));
+		if (!p) return;
+		if (m.accepted === true) {
+			// even an ack that came after its time: the player took it
+			this.settle(p);
+		} else if (p === this.inFlight && id === p.ids[p.ids.length - 1]) {
+			// refused: someone spoke first. It waits for the next quiet moment,
+			// and for a status after the one the refusal was decided against.
+			this.requeue();
+			if (this.epoch === p.epoch) this.stale = true;
+		} else {
+			return; // a refusal of an older send changes nothing
 		}
+		this.pump();
 	}
 
 	private requeue(): void {
 		clearTimeout(this.ackTimer);
 		if (!this.inFlight) return;
-		this.inFlight.id = undefined;
 		this.queue.push(this.inFlight);
 		this.inFlight = null;
 	}
@@ -231,27 +334,28 @@ export class Offers {
 				const best = ready.reduce((a, b) =>
 					b.req.priority > a.req.priority || (b.req.priority === a.req.priority && b.at < a.at) ? b : a,
 				);
-				this.queue.splice(this.queue.indexOf(best), 1);
-				this.send(best);
-				return;
+				if (this.send(best)) return;
+			} else {
+				next = Math.min(next, ...this.queue.map((p) => p.req.quiet_ms - quiet));
 			}
-			next = Math.min(next, ...this.queue.map((p) => p.req.quiet_ms - quiet));
 		}
-		this.wake = setTimeout(() => this.pump(), Math.max(1, next));
+		this.wake = setTimeout(() => this.pump(), Math.min(Math.max(1, next), OFFER_WAIT_MAX_MS));
 	}
 
-	private send(p: Pending): void {
+	private send(p: Pending): boolean {
 		const id = this.hub!.nextId();
-		p.id = id;
+		if (!this.hub!.send({ t: "offer", id, epoch: this.epoch, text: p.req.text })) return false;
+		this.queue.splice(this.queue.indexOf(p), 1);
+		p.ids.push(id);
+		p.epoch = this.epoch;
 		this.inFlight = p;
-		if (!this.hub!.send({ t: "offer", id, epoch: this.epoch, text: p.req.text })) {
-			this.requeue();
-			return;
-		}
 		this.ackTimer = setTimeout(() => {
+			// no answer counts as a refusal; an `accepted` that comes later still counts
 			this.log(`[offers] the player did not answer offer ${id}; it waits again`);
 			this.requeue();
+			this.stale = true;
 			this.pump();
 		}, OFFER_ACK_MS);
+		return true;
 	}
 }

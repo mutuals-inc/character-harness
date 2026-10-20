@@ -9,7 +9,7 @@ import { test, type TestContext } from "node:test";
 import WebSocket from "ws";
 import type { HookInput, Loaded, ServiceContext } from "../src/extensions.ts";
 import type { Character } from "../src/manifest.ts";
-import { Offers, type LinkHub } from "../src/offers.ts";
+import { LinkServer, Offers, OFFER_ACK_MS, type LinkHub } from "../src/offers.ts";
 import { runSession } from "../src/session.ts";
 import type { HookName, State } from "../src/state.ts";
 
@@ -144,11 +144,111 @@ test("without a link, or after it closes, offers wait; closing the session ends 
 	assert.equal(await o.offer({ text: "again" }, "x"), "closed");
 });
 
+test("a refusal decided against a status the runtime already has doesn't hold the next offer back", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	void o.offer({ text: "hello", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 1 });
+	await until(() => hub.offers().length === 1, "the offer");
+	// the player's own order: a blip of voice, its statuses, then the refusal
+	hub.player({ t: "status", voice: "listening", epoch: 2 });
+	hub.player({ t: "status", voice: "idle", epoch: 2 });
+	hub.player({ t: "ack", id: 1, accepted: false });
+	await until(() => hub.offers().length === 2, "the offer again, with no further status");
+	assert.equal(hub.offers()[1].epoch, 2);
+	o.close();
+});
+
+test("an ack that comes late still counts: the offer is taken once, not offered again", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "hello", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	await pause(OFFER_ACK_MS + 50);
+	// no answer counts as refused, so it waits for a status rather than going out again
+	assert.equal(hub.offers().length, 1);
+	hub.player({ t: "ack", id: 1, accepted: true });
+	assert.equal(await outcome, "accepted");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await pause(10);
+	assert.equal(hub.offers().length, 1);
+	assert.equal(o.take("hello")?.by, "x");
+	o.close();
+});
+
+test("a turn that names an offer whose ack never came settles it as taken", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "hello", source: "chat", quiet_ms: 0 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	// the player took it, and the link dropped before its ack
+	hub.player("closed");
+	assert.equal(o.take("hello")?.source, "chat");
+	assert.equal(await outcome, "accepted");
+	o.close();
+});
+
+test("an offer out when the link drops still expires on time", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const outcome = o.offer({ text: "hello", quiet_ms: 0, ttl_ms: 60 }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	hub.open = false;
+	hub.player("closed");
+	assert.equal(await outcome, "expired");
+	o.close();
+});
+
+test("the link tells a new session the last status, and a newer link replaces the old one", () => {
+	class Socket extends EventEmitter {
+		readyState = 1;
+		sent: string[] = [];
+		closed = false;
+		send(d: string) { this.sent.push(d); }
+		close() { this.closed = true; this.emit("close"); }
+	}
+	const socket = () => new Socket();
+	const server = new LinkServer();
+	const first = socket();
+	server.attach(first);
+	first.emit("message", Buffer.from(JSON.stringify({ t: "status", voice: "idle", epoch: 4 })), false);
+	const o = new Offers(server, () => {});
+	assert.equal(o.voice, "idle");
+	const second = socket();
+	server.attach(second);
+	assert.equal(first.closed, true);
+	assert.equal(o.voice, "offline");
+	// the old link is not listened to any more
+	first.emit("message", Buffer.from(JSON.stringify({ t: "status", voice: "idle", epoch: 5 })), false);
+	assert.equal(o.voice, "offline");
+	second.emit("message", Buffer.from(JSON.stringify({ t: "status", voice: "speaking", epoch: 5 })), false);
+	assert.equal(o.voice, "speaking");
+	assert.equal(server.send({ t: "x" }), true);
+	assert.deepEqual(second.sent, [JSON.stringify({ t: "x" })]);
+	o.close();
+});
+
+test("a voice listener that rejects is logged, not left unhandled", async () => {
+	const hub = fakeHub();
+	const lines: string[] = [];
+	const o = new Offers(hub, (l) => lines.push(l));
+	o.onVoice(async () => { throw new Error("nope"); });
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => lines.some((l) => l.includes("nope")), "the log line");
+	o.close();
+});
+
 test("an offer needs text, and its source is a word", () => {
 	const o = new Offers(undefined, () => {});
 	assert.throws(() => o.offer({ text: " " }, "x"), /text/);
 	assert.throws(() => o.offer({ text: "hi", source: "Twitch Chat" }, "x"), /source/);
 	assert.throws(() => o.offer({ text: "hi", ttl_ms: Number.NaN }, "x"), /ttl_ms/);
+	assert.throws(() => o.offer({ text: "hi", quiet_ms: 2 ** 31 * 10 }, "x"), /quiet_ms/);
+	assert.throws(() => o.offer({ text: "hi\u0000there" }, "x"), /control characters/);
+	assert.doesNotThrow(() => void o.offer({ text: "two\nlines\tand a tab" }, "x"));
 	o.close();
 });
 
@@ -309,5 +409,36 @@ test("a service that fails is started again", async (t) => {
 	]);
 	await until(() => runs === 2, "the second run", 3000);
 	assert.ok(s.logged("flaky service failed: boom; starting it again in 1s"));
+	await s.close();
+});
+
+test("a service reads what its own hook wrote on the turn still open, and a run that failed leaves no listener", async (t) => {
+	let ctx: ServiceContext | undefined;
+	let runs = 0;
+	const heard: number[] = [];
+	let release = () => {};
+	const held = new Promise<void>((r) => { release = r; });
+	const svc = extension("svc", {
+		hooks: [
+			["before_llm", (i) => ({ state: { ...i.state, ext: { ...i.state.ext, svc: { seen: i.state.input?.text } } } })],
+			["after_llm", () => held],
+		],
+		service: async (c) => {
+			const run = ++runs;
+			c.voice.on(() => { heard.push(run); });
+			if (run === 1) throw new Error("first run");
+			ctx = c;
+			await new Promise((r) => c.signal.addEventListener("abort", r));
+		},
+	});
+	const s = session(t, [svc]);
+	await until(() => ctx !== undefined, "the second run", 3000);
+	// the failed run's listener is gone; only the live run's hears the voice
+	s.hub.player({ t: "status", voice: "idle", epoch: 0 });
+	assert.deepEqual(heard, [2]);
+	s.app({ t: "llm", id: 1, history: [{ role: "user", content: "hey" }] });
+	await until(() => (ctx!.ext.get() as { seen?: string } | undefined)?.seen === "hey", "the hook's write");
+	assert.deepEqual(ctx!.ext.get(), { seen: "hey" });
+	release();
 	await s.close();
 });

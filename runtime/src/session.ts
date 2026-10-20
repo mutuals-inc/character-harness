@@ -244,15 +244,18 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		if (turn && !turn.closed) turn.state.ext = applyExt(turn.state.ext, changes);
 	};
 	const startService = (e: Loaded) => {
-		const ctx: ServiceContext = {
+		// Each run gets its own signal and voice listeners, so a run that failed
+		// leaves nothing behind beside the one that replaces it.
+		const context = (run: AbortSignal, listening: Set<() => void>): ServiceContext => ({
 			config: e.config,
 			session: { id: session.id, channel: session.channel },
-			signal: services.signal,
+			signal: run,
 			log: (line) => log(`[ext] ${e.name} service: ${line}`),
 			ext: {
-				get: () => structuredClone(ext[e.name]),
+				// the open turn has what this extension's hooks wrote in it so far
+				get: () => structuredClone((turn && !turn.closed ? turn.state.ext : ext)[e.name]),
 				set: (value) => {
-					if (!closed) setOwnExt(e.name, value);
+					if (!closed && !run.aborted) setOwnExt(e.name, value);
 				},
 			},
 			offer: (req) => offers.offer(req, e.name),
@@ -263,20 +266,32 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				get since() {
 					return offers.since;
 				},
-				on: (fn) => offers.onVoice(fn),
+				on: (fn) => {
+					const off = offers.onVoice(fn);
+					listening.add(off);
+					return () => { off(); listening.delete(off); };
+				},
 			},
-		};
+		});
 		const loop = async () => {
 			let wait: number = SERVICE_RETRY_MS[0];
 			while (!services.signal.aborted) {
 				const began = Date.now();
+				const run = new AbortController();
+				const stop = () => run.abort();
+				services.signal.addEventListener("abort", stop, { once: true });
+				const listening = new Set<() => void>();
 				try {
-					await e.run!(ctx);
+					await e.run!(context(run.signal, listening));
 					return; // a service that returns has nothing more to do
 				} catch (err) {
 					if (services.signal.aborted) return;
 					if (Date.now() - began > SERVICE_HEALTHY_MS) wait = SERVICE_RETRY_MS[0];
 					log(`[ext] ${e.name} service failed: ${err instanceof Error ? err.message : String(err)}; starting it again in ${wait / 1000}s`);
+				} finally {
+					run.abort();
+					services.signal.removeEventListener("abort", stop);
+					for (const off of listening) off();
 				}
 				await new Promise<void>((r) => {
 					const stop = () => { clearTimeout(timer); r(); };
