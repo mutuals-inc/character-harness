@@ -537,7 +537,7 @@ test("a store over the limit is cut down when it's loaded, and ids past the safe
 	assert.equal(s.next_id, 31);
 });
 
-test("the store is written for its owner only", async () => {
+test("the store is written for its owner only", { skip: process.platform === "win32" ? "NTFS access is governed by ACLs, not POSIX permission bits" : false }, async () => {
 	const dir = path.join(tempDir(), "nested");
 	await saveStore(path.join(dir, "t.memory.json"), { version: 1, next_id: 1, memories: [] });
 	assert.equal(statSync(path.join(dir, "t.memory.json")).mode & 0o777, 0o600);

@@ -1,0 +1,242 @@
+import { randomBytes } from "node:crypto";
+import { createReadStream, existsSync } from "node:fs";
+import {
+  createServer,
+  type IncomingMessage,
+  type ServerResponse,
+} from "node:http";
+import path from "node:path";
+import { WebSocketServer } from "ws";
+import { createServer as createViteServer } from "vite";
+import { loadExtensions } from "../../runtime/src/extensions.ts";
+import { requiredKeys } from "../../runtime/src/manifest.ts";
+import { runSession } from "../../runtime/src/session.ts";
+import { HOOKS } from "../../runtime/src/state.ts";
+import {
+  characterById,
+  describeCharacter,
+  environment,
+  listCharacters,
+  modelFile,
+  ROOT,
+  saveCharacter,
+} from "./catalog.ts";
+import {
+  authenticated,
+  readJson,
+  sameOrigin,
+  trustedHost,
+} from "./security.ts";
+import { eventsAfter, instrument } from "./telemetry.ts";
+
+const directory = path.resolve(import.meta.dirname, "..");
+const port = Number(process.env.FRONTEND_PORT ?? 4173);
+const secret = randomBytes(32).toString("hex");
+const production = process.argv.includes("--production");
+if (!Number.isInteger(port) || port < 1 || port > 65535)
+  throw new Error("Invalid FRONTEND_PORT.");
+let active = false;
+
+function json(res: ServerResponse, data: unknown, status = 200) {
+  res.writeHead(status, {
+    "content-type": "application/json",
+    "cache-control": "no-store",
+  });
+  res.end(JSON.stringify(data));
+}
+
+function file(res: ServerResponse, filename: string) {
+  if (!existsSync(filename)) {
+    res.writeHead(404);
+    res.end("Not found");
+    return;
+  }
+  const types: Record<string, string> = {
+    ".html": "text/html",
+    ".js": "text/javascript",
+    ".css": "text/css",
+    ".svg": "image/svg+xml",
+    ".webp": "image/webp",
+    ".ttf": "font/ttf",
+    ".glb": "model/gltf-binary",
+    ".vrm": "model/gltf-binary",
+  };
+  res.writeHead(200, {
+    "content-type": types[path.extname(filename)] ?? "application/octet-stream",
+  });
+  createReadStream(filename)
+    .on("error", () => res.destroy())
+    .pipe(res);
+}
+
+async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
+  if (!authenticated(req, secret))
+    return json(res, { error: "Open the studio first." }, 401);
+  if (req.method !== "GET" && !sameOrigin(req))
+    return json(res, { error: "Origin refused." }, 403);
+  if (url.pathname === "/api/events" && req.method === "GET") {
+    const after = Number(url.searchParams.get("after") ?? 0);
+    return json(res, eventsAfter(Number.isFinite(after) ? after : 0));
+  }
+  if (url.pathname === "/api/bootstrap" && req.method === "GET") {
+    const characters = listCharacters();
+    const c = characterById(
+      url.searchParams.get("character") ?? characters[0]?.id ?? "",
+    );
+    return json(res, {
+      characters: characters.map(({ id, name }) => ({ id, name })),
+      character: await describeCharacter(c),
+      hooks: HOOKS,
+    });
+  }
+  if (url.pathname === "/api/model" && req.method === "GET") {
+    const c = characterById(url.searchParams.get("character") ?? "");
+    if (c.rig.kind === "model") {
+      const { prepareModel } = await import("../../runtime/src/rig/prepare.ts");
+      return file(res, prepareModel(c.id, c.rig).file);
+    }
+    return file(res, modelFile(c));
+  }
+  if (url.pathname === "/api/character" && req.method === "POST") {
+    if (active)
+      return json(
+        res,
+        { error: "End the session before saving character settings." },
+        409,
+      );
+    const body = await readJson(req);
+    return json(res, await saveCharacter(characterById(String(body.id)), body));
+  }
+  return json(res, { error: "Not found." }, 404);
+}
+
+const server = createServer(async (req, res) => {
+  res.setHeader("X-Content-Type-Options", "nosniff");
+  res.setHeader("Referrer-Policy", "no-referrer");
+  res.setHeader("Cross-Origin-Resource-Policy", "same-origin");
+  res.setHeader("X-Frame-Options", "DENY");
+  if (!trustedHost(req, port))
+    return json(res, { error: "Host refused." }, 403);
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  if (url.pathname === "/")
+    res.setHeader(
+      "Set-Cookie",
+      `mutuals_studio=${secret}; HttpOnly; SameSite=Strict; Path=/`,
+    );
+  try {
+    if (url.pathname.startsWith("/api/")) return await api(req, res, url);
+    if (!production)
+      return vite!.middlewares(req, res, () => {
+        res.writeHead(404);
+        res.end("Not found");
+      });
+    const relative =
+      decodeURIComponent(url.pathname).replace(/^\/+/, "") || "index.html";
+    const target = path.resolve(directory, "dist", relative);
+    if (
+      path.relative(path.join(directory, "dist"), target).startsWith("..") ||
+      path.isAbsolute(path.relative(path.join(directory, "dist"), target))
+    )
+      return json(res, { error: "Invalid path." }, 403);
+    file(res, target);
+  } catch (error) {
+    // Provider and extension exceptions may include credentials. Keep only known local errors public.
+    const message = error instanceof Error ? error.message : "";
+    const safe =
+      /^(Invalid |Character not found|The character changed|End the session|A setting|The request|Expected a JSON|This profile)/.test(
+        message,
+      );
+    json(
+      res,
+      {
+        error: safe
+          ? message
+          : "Could not load or save the character. Run npm run check from the harness for details.",
+      },
+      400,
+    );
+  }
+});
+
+const vite = production
+  ? null
+  : await createViteServer({
+      root: directory,
+      configFile: path.join(directory, "vite.config.ts"),
+      server: { middlewareMode: true, hmr: { server } },
+      appType: "spa",
+    });
+const sessions = new WebSocketServer({
+  noServer: true,
+  maxPayload: 4 * 1024 * 1024,
+});
+
+server.on("upgrade", (req, socket, head) => {
+  const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  if (url.pathname !== "/studio-session") return; // Vite owns its own HMR upgrade.
+  if (
+    !trustedHost(req, port) ||
+    !sameOrigin(req) ||
+    !authenticated(req, secret)
+  ) {
+    socket.destroy();
+    return;
+  }
+  sessions.handleUpgrade(req, socket, head, async (ws) => {
+    if (active) {
+      ws.send(
+        JSON.stringify({
+          t: "error",
+          text: "Another studio session is already running.",
+        }),
+      );
+      ws.close();
+      return;
+    }
+    active = true;
+    ws.once("close", () => {
+      active = false;
+    });
+    try {
+      const c = characterById(url.searchParams.get("character") ?? "");
+      const disabled = new Set(
+        (url.searchParams.get("disabled") ?? "").split(","),
+      );
+      c.extensions = c.extensions.filter((e) => !disabled.has(e.name));
+      const env = environment(c);
+      const missing = requiredKeys(c).filter((key) => !env[key]);
+      if (missing.length)
+        throw new Error(
+          `Missing keys: ${missing.join(", ")}. Add them to .env.`,
+        );
+      for (const key of requiredKeys(c)) process.env[key] = env[key];
+      const extensions = await loadExtensions(c.extensions);
+      if (ws.readyState !== 1) return;
+      runSession(ws, c, instrument(extensions, ws));
+    } catch (error) {
+      const message =
+        error instanceof Error && error.message.startsWith("Missing keys:")
+          ? error.message
+          : "The session could not start. Check the character configuration.";
+      ws.send(JSON.stringify({ t: "error", text: message }));
+      ws.close();
+    }
+  });
+});
+
+server.listen(port, "127.0.0.1", () =>
+  console.log(
+    `Mutuals Character Studio: http://127.0.0.1:${port}\nLocal frontend · no native player is launched · harness: ${ROOT}`,
+  ),
+);
+async function shutdown() {
+  for (const ws of sessions.clients) ws.close();
+  await vite?.close();
+  server.close();
+}
+process.on("SIGINT", () => {
+  void shutdown();
+});
+process.on("SIGTERM", () => {
+  void shutdown();
+});

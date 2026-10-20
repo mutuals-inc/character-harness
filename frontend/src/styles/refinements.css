@@ -1,0 +1,162 @@
+.character-intro {
+  position: relative;
+  padding-top: 27px;
+  padding-bottom: 24px;
+}
+.character-intro > .avatar {
+  position: absolute;
+  right: 25px;
+  top: 27px;
+  width: 44px;
+  height: 44px;
+  font-size: 24px;
+  border-width: 3px;
+  margin: 0;
+}
+.character-intro > .avatar .avatar-star {
+  font-size: 13px;
+  right: -5px;
+  top: -3px;
+}
+.character-intro h2 {
+  font-size: 24px;
+  max-width: calc(100% - 42px);
+}
+.character-intro p {
+  font-size: 12px;
+  max-width: none;
+  margin-top: 16px;
+  color: #71816b;
+}
+.character-intro .text-button {
+  font-size: 10px;
+  margin-top: 15px;
+}
+.inspector-tabs button {
+  font-size: 11px;
+}
+.info-row,
+.info-row > span:first-child,
+.info-row > span + span,
+.info-row .plain-button {
+  font-size: 11px;
+}
+.section-heading h3 {
+  font-size: 12px;
+}
+.scene-options label,
+.scene-options select,
+.background-label {
+  font-size: 11px;
+}
+.inspector-footnote {
+  gap: 10px;
+}
+.inspector-footnote > .icon-button {
+  margin-left: auto;
+  width: 26px;
+  height: 26px;
+  color: #8a9b79;
+}
+.stage-caption {
+  font-size: 12px;
+}
+.gesture-buttons .button {
+  font-size: 11px;
+}
+.chat-composer input {
+  font-size: 13px;
+}
+.nav-label,
+.eyebrow {
+  color: #7e8d72;
+}
+.field label {
+  color: #5f7355;
+}
+.toggle-row {
+  color: #627b56;
+}
+.code-tag {
+  color: #718a5e;
+}
+.hook-step code {
+  color: #607d4d;
+}
+.event-row > span:first-of-type {
+  color: #668752;
+}
+.extension-card .toggle-row {
+  color: #617f4f;
+}
+.surface-heading p {
+  color: #77876a;
+}
+.hook-details > .surface > .subtle {
+  color: #7e8f70;
+}
+.stage.paper .stage-caption,
+.stage.blue .stage-caption {
+  color: #435f69;
+}
+.scene-options select {
+  color: #657b53;
+}
+.info-row > span:first-child {
+  color: #78896a;
+}
+.info-row > span + span,
+.info-row .plain-button {
+  color: #687f57;
+}
+@media (max-width: 1030px) {
+  .character-intro {
+    display: none;
+  }
+  .info-row,
+  .info-row > span:first-child,
+  .info-row > span + span,
+  .info-row .plain-button {
+    font-size: 10px;
+  }
+  .scene-options label,
+  .scene-options select,
+  .background-label {
+    font-size: 10px;
+  }
+  .inspector-footnote {
+    display: none;
+  }
+}
+@media (max-width: 760px) {
+  .sidebar nav {
+    scrollbar-width: none;
+  }
+  .sidebar nav::-webkit-scrollbar {
+    display: none;
+  }
+  .stage-caption {
+    font-size: 10px;
+  }
+  .gesture-buttons .button {
+    font-size: 10px;
+  }
+  .chat-composer input {
+    font-size: 12px;
+  }
+  .info-row,
+  .info-row > span:first-child,
+  .info-row > span + span,
+  .info-row .plain-button {
+    font-size: 9px;
+  }
+}
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *:before,
+  *:after {
+    scroll-behavior: auto !important;
+    transition: none !important;
+    animation: none !important;
+  }
+}
