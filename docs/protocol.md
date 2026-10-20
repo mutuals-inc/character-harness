@@ -53,3 +53,5 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 ### Silent replies
 
 When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, text:"…"}` followed by `llm_done`. The app voices `…` as silence: its `tts` gets no answer.
+
+A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.

@@ -33,6 +33,13 @@ on_session_end     the call or conversation ended
 
 A blocking extension on `before_reply` or `before_llm` ends the turn by setting `cancel: true`. The runtime skips or aborts the LLM call, nothing is spoken, and `after_turn` still fires. If a `before_reply` extension times out, the character replies.
 
+The chat model can also stay quiet itself, by answering its `silent_reply` (see "The chat model"). The two work together:
+
+- A `before_reply` gate is cheap and fast. Use it for what a rule or a small model can tell: the line was a cough, or another voice in the room.
+- The chat model's silent reply is for what needs the whole context to tell: the persona, its rules, the conversation so far. The line was meant for someone else, or the character has decided to ignore it.
+
+Either way the app gets the same silent reply.
+
 ## Hooks
 
 | Hook | Fires | State ready | Typical use |
@@ -40,7 +47,7 @@ A blocking extension on `before_reply` or `before_llm` ends the turn by setting 
 | `on_session_start` | a session opens | `character`, `session` | prefetch memories, open a gamification session |
 | `before_reply` | input arrived; runs alongside `before_llm` and the LLM call | `input`, `messages` | the gate (reply or stay quiet), moderation that cancels the turn |
 | `before_llm` | the prompt is being built | `input`, `messages`, `prompt` | memory recall, context injection, blocking a topic |
-| `after_llm` | the full reply is written; early sentences may already be playing | `+ reply` | observability spans, logging the reply |
+| `after_llm` | the full reply is written (a silent reply is cut off at the token); early sentences may already be playing | `+ reply` | observability spans, logging the reply |
 | `on_sentence` | per sentence, while TTS synthesizes it | `+ sentence`, `beats` | staging: emotion, gesture, camera |
 | `on_speak` | a sentence's audio and timing are ready | `sentence` + `timing` | sync expressions to the audio |
 | `after_turn` | the turn is closed | everything | memory writes, metrics, rewards, transcripts, eval data |
@@ -78,6 +85,7 @@ models:
       temperature: 0.9               # chat_completions only
       max_tokens: 1200
       # reasoning_effort: low        # responses only
+    silent_reply: "[pass]"           # optional, what the model answers to say nothing
 ```
 
 | `api` | For |
@@ -87,6 +95,8 @@ models:
 
 - The runtime sends `prompt` as the system message, then `messages`. It streams the answer into sentences for `on_sentence` and writes the full text to `reply`.
 - On failure the runtime sets `error` and ends the turn. `after_turn` still fires.
+- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is what had arrived when the model was stopped. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
+- The runtime never tells the model about `silent_reply`. The character's prompt says when to answer it. The app keeps a silent reply in the history as `…`, and the runtime turns it back into the token before the model sees it. That includes turns an extension cancelled, so the model sees those as its own silent replies too.
 
 ## The voice
 
@@ -137,7 +147,7 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `sentence` | the current sentence, inside `on_sentence` and `on_speak` |
 | `beats` | inside `on_sentence`: cues an extension adds for this sentence (see "Beats") |
 | `timing` | when each character of the sentence is heard, inside `on_speak` |
-| `cancel` | `true` to end the turn without replying, set on `before_reply` or `before_llm` |
+| `cancel` | `true` to end the turn without replying, set on `before_reply` or `before_llm`, or by the runtime when the model answers its `silent_reply` |
 | `error` | why the turn failed, if it did |
 | `ext.<name>` | whatever an extension wants to keep |
 
