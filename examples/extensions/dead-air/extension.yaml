@@ -1,0 +1,4 @@
+name: dead-air
+handler: index.ts
+# no hooks: it only watches the voice and offers a turn
+service: true

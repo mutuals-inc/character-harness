@@ -23,6 +23,7 @@
 #include "app/app_character.h"
 #include "app/player.h"
 #include "app/player_vrm.h"
+#include "app/player_offers.h"
 #include "rendering/renderer.h"
 #include "rendering/material.h"
 #include "rendering/camera.h"
@@ -74,6 +75,7 @@ typedef struct AppState {
   f32 mic_debug_peak;    // loudest sample since the last debug line
   u32 mic_debug_frames;
   CharacterVoice vs;
+  PlayerOffers offers;
   f32 talk_hold;
   i32 last_talk_want;
   HzHandleT(GestureSetBlobAsset) gesture_asset;
@@ -728,8 +730,10 @@ HZ_APP_API void app_init(AppMemory *memory) {
                            .vad_model = vad.success ? vad.buffer : 0,
                            .vad_model_len = vad.success ? vad.buffer_len : 0,
                        });
-  // the engine's built-in greeting stays shut: the character never speaks first
+  // the engine's built-in greeting stays shut: the character speaks first only
+  // when an extension offers it a turn, over the offers link
   character_voice_hold_greeting(&state->vs, true);
+  player_offers_init(&state->offers, state->url);
 
   scene_system_create(&state->scene_sys, w, assets, &assets->allocator);
   state->scene = scene_load_file(&state->scene_sys, APP_STAGE_SCENE);
@@ -803,6 +807,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
     app_character_over_hair_update(&state->character, w);
     player_mic_tick(state);
     character_voice_tick(&state->vs, memory->dt);
+    player_offers_tick(&state->offers, &state->vs, memory->dt);
     player_talk_tick(state, memory->dt);
     player_mic_debug_tick(state, memory->dt);
   }

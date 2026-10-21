@@ -10,6 +10,7 @@ Read `docs/architecture.md` first.
 - Look and body: `rig:`, a VRM model and the animations it plays (or a profile cooked into the player, like FoxGlove's).
 - The app that shows the character: `player/`, C on the Kaigen engine. Building it needs a Kaigen licence.
 - Behavior that runs every turn: an extension under `extensions/<name>/`, described by its `extension.yaml` and listed in the character's `extensions:`.
+- Behavior that runs between turns and may start one (a chat to watch, a timer): the extension's `service`, with `service: true` in its `extension.yaml` (`docs/extensions.md`, "Services").
 
 ## Rules
 
