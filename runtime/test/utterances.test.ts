@@ -276,3 +276,27 @@ test("on one socket, a final that comes back after the next utterance began keep
 	assert.deepEqual(heard[0], { text: "one", start_ms: 100, end_ms: 900 });
 	assert.deepEqual(heard[1], { text: "two", start_ms: 5100, end_ms: 5400 });
 });
+
+test("audio after a stt_eos with no stt_start is timed as a new stretch", async (t) => {
+	const s = await fakeScribe();
+	t.after(() => s.wss.close());
+	const clock = { now: 0 };
+	const { r, heard } = relay(s.url, clock);
+	t.after(() => r.close());
+	r.start(undefined);
+	await until(() => s.sockets.length === 1);
+	clock.now = 1000;
+	r.audio(frame(1000));
+	await until(() => s.samples() === 1000 * 16);
+	s.answers.push({ text: "one", words: [{ type: "word", start: 0.1, end: 0.9 }] });
+	r.endOfSpeech(undefined);
+	await until(() => heard.length === 1);
+	// the app speaks again 5 s later without a stt_start
+	clock.now = 6500;
+	r.audio(frame(500));
+	await until(() => s.samples() === 1500 * 16);
+	s.answers.push({ text: "two", words: [{ type: "word", start: 1.1, end: 1.4 }] });
+	r.endOfSpeech(undefined);
+	await until(() => heard.length === 2);
+	assert.deepEqual(heard[1], { text: "two", start_ms: 6100, end_ms: 6400 });
+});

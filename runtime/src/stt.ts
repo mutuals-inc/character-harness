@@ -90,6 +90,8 @@ export class SttRelay {
 	// upstreams opened so far; audio that waits goes to the next one
 	private upstream = 0;
 	private stretches: Stretch[] = [];
+	// between a stt_start and its stt_eos; audio outside one starts a stretch
+	private speaking = false;
 	private commitUtterance = () => { this.commitPending = true; };
 	private retryAt = 0;
 	private retryTimer: ReturnType<typeof setTimeout> | undefined;
@@ -115,11 +117,13 @@ export class SttRelay {
 		if (Number.isSafeInteger(utterance) && (utterance as number) > 0) this.reset(utterance as number);
 		this.stretches.push({ upstream: this.target(), from: this.isOpen() ? this.sent : this.queued, t0: Infinity });
 		if (this.stretches.length > STRETCHES_MAX) this.stretches.shift();
+		this.speaking = true;
 		void this.open();
 	}
 
 	endOfSpeech(utterance: unknown): void {
 		if (this.utterance !== undefined && utterance !== this.utterance) return;
+		this.speaking = false;
 		// before the upstream is open, the commit waits for it
 		this.commitUtterance();
 		void this.open();
@@ -135,6 +139,7 @@ export class SttRelay {
 		this.sent = 0;
 		this.queued = 0;
 		this.stretches = [];
+		this.speaking = false;
 		this.commitAt = null;
 		this.commitPending = false;
 		this.commitUtterance = () => { this.commitPending = true; };
@@ -174,7 +179,8 @@ export class SttRelay {
 		const upstream = this.target();
 		let s = this.stretches.at(-1);
 		// audio with no stt_start before it, or after the upstream changed
-		if (!s || s.upstream !== upstream) {
+		if (!s || s.upstream !== upstream || !this.speaking) {
+			this.speaking = true;
 			s = { upstream, from: upTo - samples, t0: Infinity };
 			this.stretches.push(s);
 			if (this.stretches.length > STRETCHES_MAX) this.stretches.shift();
@@ -232,7 +238,7 @@ export class SttRelay {
 		const utterance = this.utterance;
 		let committed = false;
 		const segments: string[] = [];
-		let segmentWords: [number, number] | null = null;
+		const segmentWords: unknown[] = [];
 		const sock = new WebSocket(this.url, { headers: { "xi-api-key": this.apiKey } });
 		sock.on("error", () => { if (this.sock === sock) this.sock = null; });
 		const ok = await new Promise<boolean>((resolve) => {
@@ -271,19 +277,18 @@ export class SttRelay {
 			if (m.message_type === "partial_transcript") {
 				this.send({ t: "stt_partial", text, ...tag });
 			} else if (m.message_type === "committed_transcript_with_timestamps") {
-				let words = wordSpan(m.words);
+				const words = Array.isArray(m.words) ? m.words : [];
 				// auto-committed segments belong to this socket's utterance, never a later one
 				if (utterance !== undefined) {
-					if (segmentWords && words) words = [Math.min(segmentWords[0], words[0]), Math.max(segmentWords[1], words[1])];
-					else words ??= segmentWords;
-					if (!committed) { segments.push(text); segmentWords = words; return; }
+					if (!committed) { segments.push(text); segmentWords.push(...words); return; }
 					if (this.commitAt === null) return;
 				}
 				// the first final after a commit is the one the person waited on
 				this.commitAt = null;
 				const final = utterance === undefined ? text : [...segments, text].filter(Boolean).join(" ");
 				this.send({ t: "stt_final", text: final, ...tag });
-				const spoken = final.trim() && words ? this.span(upstream, words) : null;
+				const span = wordSpan(utterance === undefined ? words : [...segmentWords, ...words]);
+				const spoken = final.trim() && span ? this.span(upstream, span) : null;
 				if (spoken) this.onFinal({ text: final, ...spoken });
 				if (utterance !== undefined) sock.terminate();
 			}
