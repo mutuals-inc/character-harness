@@ -74,6 +74,7 @@ function withCues(cuesYaml: string): string {
 	temp.push(dir);
 	cpSync(FOXGLOVE, dir, { recursive: true, filter: (src) => !src.includes(`${path.sep}animations`) });
 	const manifest = readFileSync(path.join(dir, "character.yaml"), "utf8")
+		.replace(/\r\n/g, "\n")
 		.replaceAll("../../extensions", path.resolve(FOXGLOVE, "../../extensions"))
 		.replace(/(emotion-tags\n    config_file: director\.yaml\n)/, `$1  - path: ${EXAMPLE}\n    config:\n      cues: ${cuesYaml}\n`);
 	writeFileSync(path.join(dir, "character.yaml"), manifest);

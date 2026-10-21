@@ -1,0 +1,52 @@
+{
+  "date": "2026-10-20",
+  "environment": "Windows, Chrome, loopback production and development hosts",
+  "automated": {
+    "frontend": { "passed": 10, "failed": 0 },
+    "runtime": { "passed": 131, "failed": 0, "skipped": 1 },
+    "runtimeSkip": "POSIX owner-only mode bits do not establish NTFS ACL access on Windows.",
+    "frontendBuildAndTypecheck": "passed",
+    "runtimeTypecheck": "passed",
+    "demoConfiguration": "passed: 0 errors, 0 warnings"
+  },
+  "browserVerified": [
+    "Both original profile and prepared VRM characters load in the embedded renderer.",
+    "All eight gesture selectors and all nineteen expression selectors were exercised.",
+    "Original comet salute plays as a preview and from a live extension cue.",
+    "Portrait, close-up and wide framing; sky, paper and blue backdrops; camera/pose reset.",
+    "Expanded stage and Escape restoration.",
+    "Identity and temperature edits save; discard restores saved identity; saved identity survives reload.",
+    "Voice stability and similarity edits save; sliders and echo/noise switches respond.",
+    "Preference reset restores input gain to its default; pause and captions switches respond.",
+    "All eight lifecycle hook selectors and extension switches respond.",
+    "Text conversation with comet-cues and director disabled returns a real reply.",
+    "Bundled synthetic greeting flows through MediaStream, AudioWorklet, VAD, ElevenLabs STT, xAI reply, ElevenLabs TTS and the salute hook.",
+    "Muting cancels queued speech and requests; activity records Reply cancelled.",
+    "Text screen context returns a real reply with source screen in the transcript.",
+    "All eight actual lifecycle hooks are present in the exported activity, including on_session_end.",
+    "Activity hook/animation filters, export and clear; new conversation clears the transcript.",
+    "Configuration checks and key-presence status render without exposing key values.",
+    "Transcript JSON contains six actual messages with voice, chat and screen sources.",
+    "Activity JSON contains 68 events, including extension durations.",
+    "Stage export is a 2593 x 957 RGBA PNG with alpha range 0 through 255.",
+    "Phone studio layout was visually inspected before responsive navigation stalled."
+  ],
+  "unverified": [
+    { "feature": "Physical microphone and acoustic interruption", "reason": "Browser permission/capture did not complete. The supplied speech sample verifies the speech pipeline, not hardware." },
+    { "feature": "Alternate hardware output and physical audibility", "reason": "Only the browser audio graph and provider speech events were exercised." },
+    { "feature": "User-selected local audio upload", "reason": "Chrome extension refused upload because file URL access is disabled. That permission was not changed." },
+    { "feature": "Pointer-driven orbit and wheel zoom", "reason": "Camera framing controls passed; no recorded pointer-drag or wheel-input acceptance check was completed." },
+    { "feature": "Complete phone navigation", "reason": "The browser control connection stalled during the responsive navigation pass." }
+  ],
+  "recording": {
+    "path": "../.cache/acceptance/mutuals-studio-walkthrough.mp4",
+    "method": "Real browser screenshot sequence with chapter overlays and synthetic explanatory narration.",
+    "originalAppAudioCaptured": false,
+    "containsMocksOfProviderReplies": false
+  },
+  "evidence": {
+    "transcript": "../.cache/acceptance/evidence/conversation.json",
+    "activity": "../.cache/acceptance/evidence/activity.json",
+    "stage": "../.cache/acceptance/evidence/stage.png"
+  }
+}

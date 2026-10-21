@@ -364,9 +364,17 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		if (t.state.cancel === true) return silent();
 
 		// The reply streams as it is written, but nothing reaches the app until
-		// before_reply has decided.
+		// before_reply has decided, nor while it could still be the model's
+		// silent reply.
+		const token = character.chat.silent_reply ?? "";
+		let maybeSilent = token !== "";
+		let passed = false; // the model answered its silent reply
 		let decided = false;
 		const held: string[] = [];
+		const release = () => {
+			for (const text of held) send({ t: "llm_delta", id, text });
+			held.length = 0;
+		};
 		void replyCancelled.then((cancel) => {
 			decided = true;
 			if (cancel) {
@@ -375,25 +383,42 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			}
 			// the app cut the turn off while it waited; what was held stays unsent
 			if (ac.signal.aborted) return;
-			for (const text of held) send({ t: "llm_delta", id, text });
-			held.length = 0;
+			if (!maybeSilent) release();
 		});
 
 		let reply = "";
 		let failure: string | null = null;
 		try {
 			const apiKey = process.env[character.chat.api_key_env] ?? "";
-			const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? [])];
+			// the app keeps a silent reply as `…`; the model wrote it as the token
+			const said = (m: Message): Message =>
+				token && m.role === "assistant" && m.content.trim() === SILENT_TURN ? { ...m, content: token } : m;
+			const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? []).map(said)];
 			for await (const text of streamChat(character.chat, apiKey, request, ac.signal)) {
 				// what arrived in the same chunk as a cancel is not sent
 				if (closed || ac.signal.aborted) break;
 				reply += text;
-				if (decided) send({ t: "llm_delta", id, text });
-				else held.push(text);
+				held.push(text);
+				if (maybeSilent) {
+					const lead = reply.trimStart();
+					if (lead.startsWith(token)) {
+						// whatever the model meant to add after it goes unwritten
+						passed = true;
+						ac.abort();
+						break;
+					}
+					if (!token.startsWith(lead)) maybeSilent = false;
+				}
+				if (decided && !maybeSilent) release();
 			}
 		} catch (e) {
 			if (!ac.signal.aborted)
 				failure = e instanceof LlmHttpError ? `llm_${e.status}` : e instanceof LlmStreamError ? "llm_failed" : "llm_network";
+		}
+		// a reply that ended while it still looked like the start of the token was not it
+		if (!passed) {
+			maybeSilent = false;
+			if (decided && !ac.signal.aborted && !closed) release();
 		}
 		// a reply with no text would leave the app waiting on the model
 		if (!failure && !reply.trim() && !ac.signal.aborted && !closed) failure = "llm_empty";
@@ -408,6 +433,12 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			send({ t: "error", id, text: failure });
 			return finish(`failed: ${failure}`);
 		}
+		// the model chose silence: the turn ends like a cancelled one, but after_llm
+		// still sees the reply
+		if (passed) {
+			t.state.cancel = true;
+			send({ t: "llm_delta", id, text: SILENT_TURN });
+		}
 		send({ t: "llm_done", id });
 		// the reply is done; after_llm below no longer counts against the limit
 		if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -416,7 +447,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const after = await runHook(exts, "after_llm", t.state, log);
 		t.state = { ...after, ext: t.state.ext };
 		writeExt(t, extChanges(before, after.ext));
-		finish(`replied, ${reply.length} chars`);
+		finish(passed ? "silent reply, nothing spoken" : `replied, ${reply.length} chars`);
 	};
 
 	// A beat that only changes the face at the start goes out as `emotion`, so it

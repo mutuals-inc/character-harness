@@ -1,0 +1,11 @@
+name: comet-cues
+handler: index.ts
+hooks:
+  on_session_start: { timeout_ms: 500 }
+  before_reply: { timeout_ms: 500 }
+  before_llm: { timeout_ms: 500 }
+  after_llm: { timeout_ms: 500 }
+  on_sentence: { timeout_ms: 500 }
+  on_speak: { timeout_ms: 500 }
+  after_turn: { timeout_ms: 500 }
+  on_session_end: { timeout_ms: 500 }

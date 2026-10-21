@@ -17,6 +17,7 @@ export interface ChatModel {
 	api_key_env: string;
 	model: string;
 	params: { temperature?: number; max_tokens?: number; reasoning_effort?: string };
+	silent_reply?: string; // a reply that starts with this is the character staying quiet
 }
 
 export interface Stt {
@@ -177,6 +178,7 @@ function readChat(file: string, models: Obj): ChatModel {
 			max_tokens: p("max_tokens").optNum(),
 			reasoning_effort: p("reasoning_effort").optStr(),
 		},
+		silent_reply: f("silent_reply").optStr(),
 	};
 }
 

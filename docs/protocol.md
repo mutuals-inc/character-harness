@@ -56,6 +56,8 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 
 When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, text:"…"}` followed by `llm_done`. The app voices `…` as silence: its `tts` gets no answer.
 
+A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.
+
 ## The offers link
 
 A service can start a turn by offering a line of input (see "Services" in `extensions.md`). The engine owns the session socket, so offers travel on a second WebSocket at the session's path plus `/offers`: `ws://127.0.0.1:8788/session/<token>/offers`. The same token and Origin rules apply. Messages are JSON text frames of at most 64 KB. The runtime keeps one link, and a newer one replaces it; the link outlives a session socket that reconnects. `runtime/src/offers.ts` is the runtime's end, `player/src/app/player_offers.c` the player's.

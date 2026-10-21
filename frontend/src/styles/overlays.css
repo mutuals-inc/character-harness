@@ -1,0 +1,76 @@
+dialog {
+  width: 500px;
+  max-width: calc(100vw - 36px);
+  border: 1px solid #d7e2cf;
+  border-radius: 14px;
+  padding: 30px;
+  background: #fffefa;
+  color: #758c64;
+  box-shadow: 0 20px 100px #29475822;
+}
+dialog::backdrop {
+  background: #23455355;
+  backdrop-filter: blur(4px);
+}
+.dialog-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 12px;
+}
+.dialog-header h2 {
+  font-family: Georgia, serif;
+  font-size: 29px;
+  letter-spacing: -0.6px;
+}
+dialog > p {
+  font-size: 12px;
+  color: #99ac87;
+  margin-bottom: 22px;
+}
+dialog form > textarea {
+  display: block;
+  resize: vertical;
+  margin-top: 9px;
+  line-height: 1.8;
+}
+#toast {
+  position: fixed;
+  bottom: 24px;
+  left: calc(50% + 116px);
+  transform: translate(-50%, 30px);
+  max-width: min(540px, 85vw);
+  padding: 13px 19px;
+  background: #335a60;
+  color: #fff;
+  border: 1px solid #ffffff40;
+  border-radius: 9px;
+  font-size: 12px;
+  line-height: 1.6;
+  z-index: 99;
+  opacity: 0;
+  pointer-events: none;
+  transition:
+    opacity 0.2s,
+    transform 0.2s;
+  box-shadow: 0 5px 25px #2347581c;
+}
+#toast.visible {
+  opacity: 1;
+  transform: translate(-50%, 0);
+}
+#toast.error {
+  background: #947864;
+}
+.boot-error {
+  margin: 12vh auto;
+  max-width: 600px;
+  padding: 30px;
+}
+.boot-error p {
+  margin: 25px 0;
+  color: #82977a;
+}
+.boot-error .button {
+  margin-top: 10px;
+}
