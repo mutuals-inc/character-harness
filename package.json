@@ -13,6 +13,7 @@
     "node": ">=23.6"
   },
   "scripts": {
+    "frontend": "npm --prefix frontend run dev",
     "start": "node runtime/src/main.ts",
     "check": "node runtime/src/main.ts --check",
     "test": "node --test \"runtime/test/*.test.ts\"",

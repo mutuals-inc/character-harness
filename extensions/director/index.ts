@@ -1,5 +1,5 @@
 // Stages each spoken sentence as beats: the emotion the character performs,
-// the talking style her body loops through, an optional gesture and an
+// the talking style the body loops through, an optional gesture and an
 // optional camera move, each anchored to the phrase where it starts. A second
 // model call picks the words from the character's vocabulary; the runtime
 // times them to the voice.

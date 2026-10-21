@@ -23,6 +23,7 @@
 #include "app/app_character.h"
 #include "app/player.h"
 #include "app/player_vrm.h"
+#include "app/player_offers.h"
 #include "rendering/renderer.h"
 #include "rendering/material.h"
 #include "rendering/camera.h"
@@ -31,6 +32,13 @@
 #include "audio.h"
 #include "hz_engine.h"
 #include "animation/animation.h"
+#if defined(HZ_PUBLISH) && defined(MACOS)
+#include <dirent.h>
+#include <stdio.h>
+#include <string.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
 
 ECS_COMPONENT_TYPEDEF(AppMemory);
 
@@ -67,6 +75,7 @@ typedef struct AppState {
   f32 mic_debug_peak;    // loudest sample since the last debug line
   u32 mic_debug_frames;
   CharacterVoice vs;
+  PlayerOffers offers;
   f32 talk_hold;
   i32 last_talk_want;
   HzHandleT(GestureSetBlobAsset) gesture_asset;
@@ -546,9 +555,104 @@ hz_internal PlayerCamMove player_camera_tick(AppState *s, f32 dt) {
   return s->cam_cur;
 }
 
+#if defined(HZ_PUBLISH) && defined(MACOS)
+// A published macOS app runs in ~/Library/Application Support/<bundle id> and
+// reads cooked/ there, but its cooked assets ship inside the app, in
+// Contents/Resources/cooked. Each one is linked into ./cooked, so the app stays
+// as signed and only what the player writes (cooked/vrm, the import cache) is
+// kept outside it. Links that point elsewhere, as after the app moved, are
+// made again, and links to assets the app no longer has are removed. Only
+// links are ever removed, never a file or folder.
+hz_internal void player_link_bundled_cooked(void) {
+  char exe[1024];
+  if (!os_exe_path(exe, sizeof(exe)))
+    return;
+  // <app>/Contents/MacOS/<exe> -> <app>/Contents/Resources/cooked
+  char *slash = strrchr(exe, '/');
+  if (!slash)
+    return;
+  *slash = 0;
+  slash = strrchr(exe, '/');
+  if (!slash)
+    return;
+  *slash = 0;
+  char bundled[1200];
+  if (snprintf(bundled, sizeof(bundled), "%s/Resources/cooked", exe) >=
+      (int)sizeof(bundled))
+    return;
+  DIR *dir = opendir(bundled);
+  if (!dir) {
+    log_error("player: the app has no cooked assets in %", fmt_cstr(bundled));
+    return;
+  }
+  mkdir("cooked", 0755);
+  struct stat cooked_st;
+  if (lstat("cooked", &cooked_st) != 0 || !S_ISDIR(cooked_st.st_mode)) {
+    log_error("player: cooked/ here is not a folder; remove it");
+    closedir(dir);
+    return;
+  }
+  struct dirent *entry;
+  while ((entry = readdir(dir))) {
+    const char *name = entry->d_name;
+    if (name[0] == '.' || strcmp(name, "vrm") == 0)
+      continue;
+    char target[1500], link_path[600], current[1500];
+    if (snprintf(target, sizeof(target), "%s/%s", bundled, name) >=
+            (int)sizeof(target) ||
+        snprintf(link_path, sizeof(link_path), "cooked/%s", name) >=
+            (int)sizeof(link_path))
+      continue;
+    ssize_t n = readlink(link_path, current, sizeof(current) - 1);
+    if (n >= 0) {
+      current[n] = 0;
+      if (strcmp(current, target) == 0)
+        continue;
+      unlink(link_path);
+    } else {
+      struct stat st;
+      if (lstat(link_path, &st) == 0) {
+        log_error("player: % is not a link to the app's assets; remove it",
+                  fmt_cstr(link_path));
+        continue;
+      }
+    }
+    if (symlink(target, link_path) != 0)
+      log_error("player: could not link % to %", fmt_cstr(link_path),
+                fmt_cstr(target));
+  }
+  closedir(dir);
+  // links left from an older app: removed, or pointing at another copy
+  size_t prefix = strlen(bundled);
+  dir = opendir("cooked");
+  if (!dir)
+    return;
+  while ((entry = readdir(dir))) {
+    char link_path[600], current[1500];
+    if (entry->d_name[0] == '.' || strcmp(entry->d_name, "vrm") == 0 ||
+        snprintf(link_path, sizeof(link_path), "cooked/%s", entry->d_name) >=
+            (int)sizeof(link_path))
+      continue;
+    ssize_t n = readlink(link_path, current, sizeof(current) - 1);
+    if (n < 0)
+      continue;
+    current[n] = 0;
+    struct stat st;
+    b32 ours = strncmp(current, bundled, prefix) == 0 &&
+               current[prefix] == '/' && stat(current, &st) == 0;
+    if (!ours)
+      unlink(link_path);
+  }
+  closedir(dir);
+}
+#endif
+
 HZ_APP_API void app_init(AppMemory *memory) {
   if (!is_main_thread())
     return;
+#if defined(HZ_PUBLISH) && defined(MACOS)
+  player_link_bundled_cooked();
+#endif
   AppState *state = memory->state;
   player_env(PLAYER_URL_ENV, PLAYER_URL_DEFAULT, state->url);
   player_env(PLAYER_CHARACTER_ENV, "",
@@ -626,8 +730,10 @@ HZ_APP_API void app_init(AppMemory *memory) {
                            .vad_model = vad.success ? vad.buffer : 0,
                            .vad_model_len = vad.success ? vad.buffer_len : 0,
                        });
-  // the engine's built-in greeting stays shut: the character never speaks first
+  // the engine's built-in greeting stays shut: the character speaks first only
+  // when an extension offers it a turn, over the offers link
   character_voice_hold_greeting(&state->vs, true);
+  player_offers_init(&state->offers, state->url);
 
   scene_system_create(&state->scene_sys, w, assets, &assets->allocator);
   state->scene = scene_load_file(&state->scene_sys, APP_STAGE_SCENE);
@@ -701,6 +807,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
     app_character_over_hair_update(&state->character, w);
     player_mic_tick(state);
     character_voice_tick(&state->vs, memory->dt);
+    player_offers_tick(&state->offers, &state->vs, memory->dt);
     player_talk_tick(state, memory->dt);
     player_mic_debug_tick(state, memory->dt);
   }

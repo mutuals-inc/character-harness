@@ -1,7 +1,7 @@
 // The `rig` section of character.yaml. Run with `npm test`.
 
 import assert from "node:assert/strict";
-import { mkdtempSync, writeFileSync } from "node:fs";
+import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import path from "node:path";
 import { test } from "node:test";
@@ -9,7 +9,7 @@ import { loadCharacter } from "../src/manifest.ts";
 
 // a minimal character whose rig is `rig` (YAML text), with empty files for its
 // model and clips
-function character(rig: string, id = "test"): string {
+function character(rig: string, id = "test", chat = ""): string {
 	const dir = mkdtempSync(path.join(tmpdir(), "harness-character-"));
 	writeFileSync(
 		path.join(dir, "character.yaml"),
@@ -21,7 +21,7 @@ author: tests
 license: none
 prompt: system.md
 models:
-  chat: { api: chat_completions, base_url: "https://example.invalid/v1", api_key_env: TEST_KEY, model: m }
+  chat: { api: chat_completions, base_url: "https://example.invalid/v1", api_key_env: TEST_KEY, model: m${chat} }
 stt: { provider: elevenlabs, model: scribe_v2_realtime }
 voice: { provider: elevenlabs, voice_id: v, model: eleven_v4_turbo }
 rig:
@@ -100,4 +100,35 @@ test("rig.springs is on unless set to false, and must be true or false", () => {
 	const off = loadCharacter(character(`  engine: ">=0.5.8"\n  model: model.vrm\n  springs: false`));
 	assert.equal(off.rig.kind === "model" && off.rig.springs, false);
 	assert.throws(() => loadCharacter(character(`  engine: ">=0.5.8"\n  model: model.vrm\n  springs: "no"`)), /rig\.springs/);
+});
+
+test("models.chat.silent_reply is optional and must be a non-empty string", () => {
+	const rig = `  engine: ">=0.5.8"\n  model: model.vrm`;
+	assert.equal(loadCharacter(character(rig)).chat.silent_reply, undefined);
+	assert.equal(loadCharacter(character(rig, "test", ', silent_reply: "[pass]"')).chat.silent_reply, "[pass]");
+	assert.throws(() => loadCharacter(character(rig, "test", ', silent_reply: "  "')), /`models.chat.silent_reply` must be a non-empty string/);
+	assert.throws(() => loadCharacter(character(rig, "test", ", silent_reply: 1")), /`models.chat.silent_reply`/);
+});
+
+// a character whose one extension has this extension.yaml (YAML text)
+function withExtension(extensionYaml: string): string {
+	const dir = character(`  engine: ">=0.5.8"\n  model: model.vrm`);
+	const ext = path.join(dir, "ext");
+	mkdirSync(ext);
+	writeFileSync(path.join(ext, "extension.yaml"), extensionYaml);
+	writeFileSync(path.join(ext, "index.ts"), "export function service() {}\n");
+	const file = path.join(dir, "character.yaml");
+	writeFileSync(file, readFileSync(file, "utf8").replace("extensions: []", "extensions:\n  - path: ext"));
+	return dir;
+}
+
+test("an extension that is only a service needs no hooks, but a service needs a module handler", () => {
+	const c = loadCharacter(withExtension("name: svc\nhandler: index.ts\nservice: true\n"));
+	assert.equal(c.extensions[0].service, true);
+	assert.equal(c.extensions[0].hooks.size, 0);
+	assert.throws(() => loadCharacter(withExtension("name: svc\nhandler: index.ts\n")), /`hooks` is required/);
+	assert.throws(
+		() => loadCharacter(withExtension("name: svc\nhandler: https://example.invalid/hook\nservice: true\nhooks: [after_turn]\n")),
+		/`service` needs a module handler/,
+	);
 });

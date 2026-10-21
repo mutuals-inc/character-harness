@@ -1,4 +1,4 @@
-// A VRM's spring bones (hair, skirts and the like that swing as she moves),
+// A VRM's spring bones (hair, skirts and the like that swing as the character moves),
 // read from either VRM version into one plain list the player turns into its
 // own cloth (player/src/app/player_vrm.c). It goes in the prepared file's
 // `extras.mutualsHarness.springs`:

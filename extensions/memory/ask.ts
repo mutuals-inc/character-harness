@@ -179,8 +179,8 @@ export function shortlist(store: Store, max: number): Memory[] {
 }
 
 // One request with every question about this message. `spanList` empty means
-// the message has nothing to keep, so only the questions about what she
-// already knows are asked.
+// the message has nothing to keep, so only the questions about what the
+// character already knows are asked.
 export function plan(
 	who: { name: string; description?: string },
 	message: string,

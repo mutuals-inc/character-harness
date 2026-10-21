@@ -1,5 +1,7 @@
 # Mutuals Character Harness
 
+![FoxGlove, the reference character](docs/images/foxglove.jpg)
+
 The harness [Mutuals](https://github.com/mutuals-inc) uses to give life to its characters: a character you can talk to by voice, with a face and body that react to what it says.
 
 > Status: pre-release. The runtime and the player work end to end. Download a ready-made player below, or build the player yourself with the Kaigen engine.
@@ -28,7 +30,7 @@ A character is a folder with a manifest, a personality prompt and a body: any VR
 |---|---|
 | `runtime/` | The conversation loop, and the preparation of VRM models and their animations for the player. |
 | `player/` | The app that shows the character. Building it needs a Kaigen licence; using a release build doesn't. |
-| `extensions/` | Plug-ins that run on every turn: `emotion-tags` changes the face from a sentence's delivery tag, `director` stages each line, `memory` remembers what the user tells her, `reactions` starts her reply with how she took what the user said. |
+| `extensions/` | Plug-ins that run on every turn: `emotion-tags` changes the face from a sentence's delivery tag, `director` stages each line, `memory` remembers what the user tells the character, `reactions` starts each reply with how the character took what the user said. |
 | `examples/` | Example extensions to copy from. `gesture-cues` is the one `docs/your-first-extension.md` builds. |
 | `characters/` | Character manifests. `foxglove/` is the reference character. |
 | `docs/` | How the pieces fit. Start with `docs/architecture.md`. |
@@ -37,8 +39,8 @@ A character is a folder with a manifest, a personality prompt and a body: any VR
 
 Needs Node 23.6 or later and the keys the character uses. FoxGlove needs two:
 
-- `ELEVENLABS_API_KEY` ([ElevenLabs](https://elevenlabs.io)): speech to text and her voice.
-- `XAI_API_KEY` ([xAI](https://x.ai)): her chat model and the director that stages her lines.
+- `ELEVENLABS_API_KEY` ([ElevenLabs](https://elevenlabs.io)): speech to text and the character's voice.
+- `XAI_API_KEY` ([xAI](https://x.ai)): the character's chat model and the director that stages its lines.
 
 The `memory` and `reactions` extensions, if a character uses them, need `TYPESAFE_API_KEY` ([Typesafe](https://typesafe.ai)).
 
@@ -48,6 +50,19 @@ The `memory` and `reactions` extensions, if a character uses them, need `TYPESAF
 4. Open Claude Code or Codex in this folder and ask it to change something. `AGENTS.md` tells it where everything lives.
 
 `npm test` runs the tests; they need no keys or network.
+
+## Local web studio (draft)
+
+The optional [frontend](frontend/README.md) puts the animated character, text and
+voice conversation, microphone settings, character editing, extensions and hook
+activity in one browser interface. It uses a browser renderer and the existing
+runtime; it does not open the native player.
+
+Install its dependencies with `npm --prefix frontend install`, then run
+`npm run frontend` and open `http://127.0.0.1:4173`. Local animation previews and
+device tests work without provider keys. Conversations use the character's
+existing `.env` configuration. See the frontend README for renderer differences
+and the draft's current limits.
 
 ## Docs
 

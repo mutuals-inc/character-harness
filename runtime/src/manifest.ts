@@ -17,6 +17,7 @@ export interface ChatModel {
 	api_key_env: string;
 	model: string;
 	params: { temperature?: number; max_tokens?: number; reasoning_effort?: string };
+	silent_reply?: string; // a reply that starts with this is the character staying quiet
 }
 
 export interface Stt {
@@ -44,6 +45,7 @@ export interface Extension {
 	dir: string;
 	handler: string; // a file in `dir`, or an http(s) URL
 	hooks: Map<HookName, HookOptions>;
+	service: boolean; // runs a long-lived `service` beside its hooks for the whole session
 	requires_env: string[];
 	config: unknown;
 }
@@ -176,6 +178,7 @@ function readChat(file: string, models: Obj): ChatModel {
 			max_tokens: p("max_tokens").optNum(),
 			reasoning_effort: p("reasoning_effort").optStr(),
 		},
+		silent_reply: f("silent_reply").optStr(),
 	};
 }
 
@@ -234,9 +237,11 @@ function readRig(file: string, dir: string, rig: Obj): Rig {
 	return { kind: "model", model: abs, idle, talk, gestures, springs: f("springs").optBool() ?? true };
 }
 
-function readHooks(file: string, ext: Obj): Map<HookName, HookOptions> {
+function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, HookOptions> {
 	const raw = ext.hooks;
 	const hooks = new Map<HookName, HookOptions>();
+	// an extension that is only a service may run on no hook at all
+	if (service && (raw === undefined || raw === null)) return hooks;
 	const check = (name: unknown): HookName => {
 		if (typeof name !== "string" || !HOOKS.includes(name as HookName))
 			throw new ManifestError(`${file}: \`hooks\` has unknown hook "${String(name)}"; hooks are ${HOOKS.join(", ")}`);
@@ -261,7 +266,7 @@ function readHooks(file: string, ext: Obj): Map<HookName, HookOptions> {
 	} else {
 		throw new ManifestError(`${file}: \`hooks\` is required, as a list of hook names or a map of hook name to options`);
 	}
-	if (!hooks.size) throw new ManifestError(`${file}: \`hooks\` names no hook`);
+	if (!hooks.size && !service) throw new ManifestError(`${file}: \`hooks\` names no hook`);
 	return hooks;
 }
 
@@ -275,6 +280,10 @@ function readExtension(characterFile: string, characterDir: string, entry: unkno
 	const handler = f("handler").str();
 	if (!/^https?:\/\//.test(handler) && !existsSync(path.join(dir, handler)))
 		throw new ManifestError(`${file}: \`handler\` ${handler} does not exist in ${dir}`);
+	const service = f("service").optBool() ?? false;
+	// a service runs inside the runtime, so it needs a module to run
+	if (service && /^https?:\/\//.test(handler))
+		throw new ManifestError(`${file}: \`service\` needs a module handler, not an http(s) URL`);
 	// config can live in its own file next to the character; inline keys win
 	const configFile = field(characterFile, entry, at, "config_file").optStr();
 	const fromFile = configFile ? readYaml(path.resolve(characterDir, configFile)) : {};
@@ -284,7 +293,8 @@ function readExtension(characterFile: string, characterDir: string, entry: unkno
 		name: f("name").str(),
 		dir,
 		handler,
-		hooks: readHooks(file, ext),
+		hooks: readHooks(file, ext, service),
+		service,
 		requires_env: readRequiresEnv(file, f("requires_env").list(), config, characterFile, at),
 		config,
 	};

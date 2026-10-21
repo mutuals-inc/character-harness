@@ -1,6 +1,6 @@
 # Your first extension
 
-This guide builds `gesture-cues`, a small extension that plays a gesture when the character says certain words: she waves on "hello" and cheers on "you did it". It makes no model call and needs no key, so you can build and test it without spending anything.
+This guide builds `gesture-cues`, a small extension that plays a gesture when the character says certain words: a wave on "hello", a cheer on "you did it". It makes no model call and needs no key, so you can build and test it without spending anything.
 
 The finished extension is in `examples/extensions/gesture-cues/`. `extensions.md` is the full contract and `architecture.md` explains the turn loop; this guide links to them instead of repeating them.
 
@@ -50,8 +50,8 @@ The handler's default export gets `{ event, state, config }` and returns `{ stat
 `extensions/gesture-cues/index.ts`:
 
 ```ts
-// Plays a gesture when the character says one of its cue phrases: she waves
-// on "hello", cheers on "you did it". The gesture lands on the phrase itself.
+// Plays a gesture when the character says one of its cue phrases: a wave
+// on "hello", a cheer on "you did it". The gesture lands on the phrase itself.
 //
 // config:
 //   cues: { "hello": wave, "you did it": cheer }   phrase -> gesture
@@ -229,7 +229,7 @@ With keys in `.env` and the player open (see the README's quickstart):
 npm start -- characters/my-fox
 ```
 
-Say hello. Her wave comes from `gesture-cues`; the director may stage the same sentence too. A blocking extension that throws or runs out of time is logged as `[ext] gesture-cues on_sentence ...` and the turn goes on without its changes.
+Say hello. The wave comes from `gesture-cues`; the director may stage the same sentence too. A blocking extension that throws or runs out of time is logged as `[ext] gesture-cues on_sentence ...` and the turn goes on without its changes.
 
 When you're done, delete `characters/my-fox`, and `extensions/gesture-cues` and `runtime/test/my-gesture-cues.test.ts` unless you mean to keep them, so they don't end up in a commit.
 

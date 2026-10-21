@@ -13,7 +13,7 @@ build steps for your platform below. The player alone does not run the conversat
 
 ## Install a release (macOS)
 
-1. Download `character-player-<version>-macos-arm64.dmg` and `SHA256SUMS` from the release (Apple Silicon Macs), and check it (`shasum -a 256 -c --ignore-missing SHA256SUMS`).
+1. Download `character-player-<version>-macos-arm64.dmg` and `SHA256SUMS-macos-arm64` from the release (Apple Silicon Macs), and check it (`shasum -a 256 -c --ignore-missing SHA256SUMS-macos-arm64`).
 2. Open it and drag Character Player to Applications.
 
    If the release notes say the build is unsigned, macOS blocks it the first time you open it. Open it once, then go to System Settings > Privacy & Security, click Open Anyway and confirm (on macOS 14 and earlier, Control-click the app and choose Open). Or, after checking the checksum, allow it from Terminal:
@@ -126,7 +126,7 @@ The runtime sets the first two when it starts the player.
 - Puts the character on the stage, with a portrait camera framed on the upper body.
 - Runs the engine's voice session against the runtime. The engine owns the socket, voice activity detection, playback and lip sync.
 - Applies beats: emotions reach the face, talking styles switch the body's loop, gestures play once, and camera words ease the framing toward `assets/mutuals/camera_moves.hzt`.
-- Never speaks first.
+- Speaks first only when an extension offers it a turn: it keeps a second socket to the runtime, the offers link, reports what its voice is doing there, and takes an offered line as the user's next turn while nobody is speaking (`../docs/protocol.md`, "The offers link"). The engine's own greeting stays off.
 
 ## FoxGlove
 
@@ -151,6 +151,7 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `release-macos.sh`, `macos.entitlements` | builds a release from a tag, signs it (ad hoc, or with a Developer ID and notarized), and attaches it to a draft GitHub release; the entitlements let the app use the mic |
 | `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera |
 | `src/app/player_vrm.c`, `.h` | runtime VRM import and caching: clips, face, rig and the generated character profile |
+| `src/app/player_offers.c`, `.h` | the offers link: the voice's status out, offered turns in |
 | `src/app/player_json.c`, `.h` | a small JSON reader for the VRM extensions and the runtime's clip table |
 | `src/app/app_character.c`, `.h`, `app_emote_clips.c` | loading and swapping the character, emote clips |
 | `src/app/app.c` | the build's entry file, which includes the others |
@@ -196,7 +197,7 @@ From a clean checkout of a `vX.Y.Z-macos-arm64` tag pushed to GitHub, on a Mac w
 player/release-macos.sh vX.Y.Z-macos-arm64
 ```
 
-It builds the app with the engine's publish build, signs it ad hoc with the microphone entitlement (`macos.entitlements`), packages the `.zip` and `.dmg`, writes `SHA256SUMS`, and creates a draft release with them. Gatekeeper treats such a build as unsigned, so people allow it on its first start (see "Install a release"). With both a Developer ID Application certificate (`MACOS_SIGNING_IDENTITY`) and a notarytool keychain profile (`MACOS_NOTARY_PROFILE`) set, it signs and notarizes it instead, and it opens with no warning; set both or neither:
+It builds the app with the engine's publish build, signs it ad hoc with the microphone entitlement (`macos.entitlements`), packages the `.zip` and `.dmg`, writes `SHA256SUMS-macos-arm64`, and creates a draft release with them and notes on running the full harness. Gatekeeper treats such a build as unsigned, so people allow it on its first start (see "Install a release"). With both a Developer ID Application certificate (`MACOS_SIGNING_IDENTITY`) and a notarytool keychain profile (`MACOS_NOTARY_PROFILE`) set, it signs and notarizes it instead, and it opens with no warning; set both or neither:
 
 ```bash
 MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" MACOS_NOTARY_PROFILE=<profile> player/release-macos.sh vX.Y.Z-macos-arm64

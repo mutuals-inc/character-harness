@@ -1,5 +1,5 @@
 // The memories of one character, as one JSON file. The harness has no idea of
-// who the user is, so whoever talks to a character shares what she remembers.
+// who the user is, so whoever talks to a character shares what it remembers.
 //
 // A memory hangs under another (a detail of it) or is a root, so the store is
 // a forest. One that stopped being true stays in it, marked out of date, so
@@ -18,7 +18,7 @@ export interface Memory {
 	parent: string | null;
 	created_at: string;
 	seen_at: string; // the last time the user said it
-	need: number; // 0..1, how much she'd be expected to remember it
+	need: number; // 0..1, how much the character would be expected to remember it
 	cost: number; // 0..1, how much forgetting it would cost
 	replaces?: string; // id of the older memory this one supersedes
 	out_of_date?: { p: number; at: string; by?: string };

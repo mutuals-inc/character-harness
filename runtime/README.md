@@ -12,7 +12,7 @@ npm start                      # FoxGlove, whose body is a profile in the player
 
 For a character with `rig.model`, it first retargets the character's animations onto its model and writes the result to `.cache/characters/<id>/` for the player (`src/rig/`). With `HARNESS_PLAYER` set to the command that opens the player, it then starts it and stops when the player closes (`src/player.ts`).
 
-It serves the app on `ws://127.0.0.1:8788/session/<token>`, with a new token on every start; it prints the URL, and gives it to the player it starts. Set `PORT` to change the port, and `HOST=0.0.0.0` so another device on the same network can reach it (it still needs the token).
+It serves the app on `ws://127.0.0.1:8788/session/<token>`, with a new token on every start, and the player's offers link on the same path plus `/offers`; it prints the URL, and gives it to the player it starts. Set `PORT` to change the port, and `HOST=0.0.0.0` so another device on the same network can reach it (it still needs the token).
 
 `../docs/protocol.md` describes the app protocol; `src/session.ts` implements it.
 

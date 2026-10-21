@@ -1,12 +1,12 @@
 # reactions
 
-How the character reacts to what the user just said: delight at good news, a softer face at bad, a flash of irritation at a jab, a laugh at a good joke, a wave at hello. It shows as she starts to answer, as one emotion on her face and maybe a gesture, on the reply's first sentence.
+How the character reacts to what the user just said: delight at good news, a softer face at bad, a flash of irritation at a jab, a laugh at a good joke, a wave at hello. It shows as the character starts to answer, as one emotion on its face and maybe a gesture, on the reply's first sentence.
 
 When the user's message arrives, one request to [Typesafe](https://typesafe.ai)'s judge model, Jev, asks a few questions about it. The extension picks an emotion and a gesture from the answers and adds them as a beat at the start of the reply's first sentence (see "Beats" in `docs/architecture.md`). The player already knows what to do with it.
 
 ## What it is and isn't
 
-- **It shows as she starts replying, not while she listens.** Beats ride on the reply's audio, so the face changes when her first sentence starts playing.
+- **It shows when the reply starts, not while the character listens.** Beats ride on the reply's audio, so the face changes when the reply's first sentence starts playing.
 - **One emotion and a gesture, nothing finer.** The emotion plays the way the player's emotion set says (its own timing and strength); there is no separate rise, hold or fall.
 - **Then the reply takes over.** The director's beats replace it as they come.
 
@@ -26,7 +26,7 @@ extensions:
 
 The order matters, because the extensions on a sentence run one after another and each one's beats go out as it returns; at the start of a sentence, the last emotion sent is the one that shows.
 
-- **After `emotion-tags`, before `director`** (the one to use): the reaction's emotion lands after the one `emotion-tags` took from the line's delivery tag, so the line starts with how she took the message, and the director's beats stage the rest of it.
+- **After `emotion-tags`, before `director`** (the one to use): the reaction's emotion lands after the one `emotion-tags` took from the line's delivery tag, so the line starts with how the character took the message, and the director's beats stage the rest of it.
 - **Before `emotion-tags`**: the emotion from the delivery tag lands right after the reaction's and replaces it before any audio plays. A character whose model opens most lines with a tag, like FoxGlove, would hardly ever show a reaction.
 - **After `director`**: don't. The director can take up to 10 s on a sentence, so the reaction would land late, in the middle of a line. And this extension tells the reply's first sentence by which one reaches it first; behind the director, which answers sentences in batches, that can be a later one.
 
@@ -46,19 +46,19 @@ What it sends is bounded: the message is cut to 4000 characters, each earlier me
 
 | Question | Kind | What |
 |---|---|---|
-| `beat` | choice | the expression that flashes across her face on first hearing it, from the config's `beat` options |
-| `settle` | choice | the mood the message puts her in a few seconds on, from the `settle` options |
-| `intensity` | score 0..4 | how much it moves her, from nothing to overwhelming |
-| `guarded` | yes/no | would she keep it off her face, out of politeness or pride |
+| `beat` | choice | the expression that flashes across the character's face on first hearing it, from the config's `beat` options |
+| `settle` | choice | the mood the message puts the character in a few seconds on, from the `settle` options |
+| `intensity` | score 0..4 | how much it moves the character, from nothing to overwhelming |
+| `guarded` | yes/no | would the character keep it off its face, out of politeness or pride |
 | `amused` | yes/no | is the message funny |
-| `personal` | yes/no | is it about her rather than the user's own life, someone else or a topic |
-| `gesture` | choice | which of her `gestures` fits, or `still` |
+| `personal` | yes/no | is it about the character rather than the user's own life, someone else or a topic |
+| `gesture` | choice | which of the character's `gestures` fits, or `still` |
 
-The judge sees the character's name, description and `about`, the last few messages and the user's message. The questions name the character: asked about "the character", the judge mixed her up with the user and rated "i got the job" as being about her. Its rubrics only describe; every threshold is in the code, since questions asked together influence each other.
+The judge sees the character's name, description and `about`, the last few messages and the user's message. The questions name the character: asked about "the character", the judge mixed the character up with the user and rated "i got the job" as being about the character. Its rubrics only describe; every threshold is in the code, since questions asked together influence each other.
 
 ## How it picks
 
-Intensity becomes 0..1 (its weighted level over the top level), and yes/no answers the probability of yes. The reaction's strength is `(0.14 + 1.05 × intensity) × (1 − 0.55 × guarded) × (1 + 0.2 × personal)`, at most 1.4: she shows less of what she'd hide and more of what's about her.
+Intensity becomes 0..1 (its weighted level over the top level), and yes/no answers the probability of yes. The reaction's strength is `(0.14 + 1.05 × intensity) × (1 − 0.55 × guarded) × (1 + 0.2 × personal)`, at most 1.4: the character shows less of what it would hide and more of what's about itself.
 
 One emotion, the first that applies:
 
@@ -77,7 +77,7 @@ One emotion, the first that applies:
 | `model.base_url` | no | default `https://api.typesafe.ai/v1` |
 | `model.model` | no | default `jev-latest` |
 | `model.timeout_ms` | no | how long it waits for the answer, default 1200, at most 1400 (the hook gives up at 1500; the check warns about more) |
-| `about` | no | a few lines on who the character is, for the judge: what she cares about, what annoys her, names it should know |
+| `about` | no | a few lines on who the character is, for the judge: what the character cares about, what annoys it, names the judge should know |
 | `context` | no | how many earlier messages the judge sees, default 6, at most 50 |
 | `beat` | yes | `{ option: emotion }`: at least two. `""` is no emotion. The options below have rubrics built in; any other needs `{ emotion, rubric }` |
 | `settle` | no | `{ option: emotion }`, the same way. Without it a mild reaction shows nothing |
@@ -93,7 +93,7 @@ A built-in option takes a `rubric` of its own to change what it means. The check
 
 ## How the defaults were tuned
 
-Against Jev, with FoxGlove's words and 36 lines: big news good and bad, small talk and filler, jokes and jokes that escalate, teasing, compliments, rude lines, questions to her, odd facts and mundane updates.
+Against Jev, with FoxGlove's words and 36 lines: big news good and bad, small talk and filler, jokes and jokes that escalate, teasing, compliments, rude lines, questions to FoxGlove, odd facts and mundane updates.
 
 - A gesture the judge picked with 0.5-0.66 confidence was usually wrong (a startled jump at "my dog died", a cheer at a compliment); the right ones came at 0.75 and up. Hence `gesture` 0.7, and gesture rubrics that say when not to move.
 - Small talk ("hey", "ok", "um, yeah, so") comes back as `nothing` with intensity under 0.1. A "goodnight" after a sad exchange scored 0.15 and would have carried a sad face over, so the mood needs 0.25.

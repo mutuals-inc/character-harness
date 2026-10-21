@@ -1,14 +1,14 @@
 # Character manifest
 
-`characters/<id>/character.yaml` describes what a character is and what she needs to run. The runtime loads her from this file and the `extension.yaml` of each extension it lists, so swapping a character is swapping a folder. Paths are relative to the character's folder.
+`characters/<id>/character.yaml` describes what a character is and what it needs to run. The runtime loads it from this file and the `extension.yaml` of each extension it lists, so swapping a character is swapping a folder. Paths are relative to the character's folder.
 
 ```yaml
 schema: 1
 
 id: foxglove
 name: FoxGlove
-description: <one line on who she is>
-purpose: <optional, what she's for>
+description: <one line on who the character is>
+purpose: <optional, what the character is for>
 author: Mutuals
 license: <what people may do with this character; separate from the code license>
 
@@ -64,11 +64,11 @@ env_file: ../../.env
 | `schema` | yes | Manifest version, so older characters keep loading. Currently `1`. |
 | `id` | yes | Stable identifier: lowercase letters, digits, `-` and `_`. It names the cache folder, so keep it unique. |
 | `name` | yes | Display name. |
-| `description` | yes | One line on who she is. |
-| `purpose` | no | What she's for. |
-| `author` | yes | Who made her. |
+| `description` | yes | One line on who the character is. |
+| `purpose` | no | What the character is for. |
+| `author` | yes | Who made the character. |
 | `license` | yes | What people may do with the character itself (fan art, revenue, brand deals). Separate from the code license. |
-| `prompt` | yes | Her personality, as one markdown file. |
+| `prompt` | yes | The personality, as one markdown file. |
 
 ## `models.chat`
 
@@ -81,6 +81,7 @@ env_file: ../../.env
 | `params.temperature` | no | `chat_completions` only. |
 | `params.max_tokens` | no | Longest reply, in tokens. |
 | `params.reasoning_effort` | no | `responses` only, like `low`. |
+| `silent_reply` | no | A token like `[pass]` the model answers when it means to say nothing. A reply that starts with it is silent. The character's prompt teaches the model when to use it; the runtime adds nothing to the prompt. |
 
 Models an extension uses belong to that extension, not here. See "The chat model" in `architecture.md`.
 
@@ -91,7 +92,7 @@ Models an extension uses belong to that extension, not here. See "The chat model
 | `provider` | yes | `elevenlabs`. |
 | `model` | yes | Like `scribe_v2_realtime`. |
 | `language` | no | Language code, like `en`. |
-| `keyterms` | no | Names from her world the model should hear right. |
+| `keyterms` | no | Names from the character's world the model should hear right. |
 
 ## `voice`
 
@@ -113,8 +114,8 @@ The body. Either a VRM model with the animations it plays, or a profile cooked i
 | `rig.model` | one of these | A `.vrm` file (VRM 0.x or 1.0). |
 | `rig.profile` | one of these | A profile cooked into a player build, by its bare name (no path or extension). Needs `emotions` too. |
 | `rig.springs` | no | With `rig.model`: `false` keeps the model's VRM spring bones (hair, skirts) still. Default `true`. |
-| `rig.animations.idle` | no | The loop she plays while listening. One clip or a list. |
-| `rig.animations.talk.<style>` | no | Loops she plays while talking, per talking style. `regular` is the default style; the others are what the director's `registers` pick from. |
+| `rig.animations.idle` | no | The loop played while listening. One clip or a list. |
+| `rig.animations.talk.<style>` | no | Loops played while talking, per talking style. `regular` is the default style; the others are what the director's `registers` pick from. |
 | `rig.animations.gestures.<name>` | no | One-shot gestures the director's `gestures` pick from. A clip, or `{ clip, hold: true }` for a pose that holds until the next beat. |
 | `emotions` | with `profile` | The profile's emotion set file. |
 

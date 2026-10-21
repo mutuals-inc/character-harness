@@ -91,7 +91,7 @@ const sentence = async (session: string, turn: number, text = "No way!", cfg = c
 
 // ---- choosing the beat ----
 
-test("a strong reaction is the emotion she answers with, with no gesture unless the judge is sure", () => {
+test("a strong reaction is the emotion the reply starts with, with no gesture unless the judge is sure", () => {
 	const c = resolve(config());
 	assert.deepEqual(decide(judged(), c), { span: "", emotion: "happy" });
 	assert.deepEqual(decide(judged({ beat: { choice: "lit_up", confidence: 0.8 }, gesture: { choice: "cheer", confidence: 0.9 } }), c), {
@@ -101,7 +101,7 @@ test("a strong reaction is the emotion she answers with, with no gesture unless 
 	});
 });
 
-test("how strong a reaction is: a guarded one shows less, one about her shows more", () => {
+test("how strong a reaction is: a guarded one shows less, one about the character shows more", () => {
 	const open = strength(judged());
 	near(open, 0.14 + 1.05 * 0.6);
 	near(strength(judged({ guarded: 1 })), open * 0.45);
@@ -119,7 +119,7 @@ test("a mild or unsure reaction gives way to the mood, and a light line to nothi
 	assert.equal(decide(judged({ beat: { choice: "delight", confidence: 0.3 } }), c)?.emotion, "warm");
 	// a guarded one doesn't show as itself
 	assert.equal(decide(judged({ guarded: 1 }), c)?.emotion, "warm");
-	// the mood needs confidence, and a message that moved her
+	// the mood needs confidence, and a message that moved the character
 	assert.equal(decide(judged({ intensity: 0.35, settle: { choice: "warm", confidence: 0.1 } }), c), null);
 	assert.equal(decide(judged({ intensity: 0.2 }), c), null);
 	// "nothing" has no emotion: the mood it is
@@ -134,7 +134,7 @@ test("a really funny line laughs, whatever the reaction", () => {
 	assert.equal(decide(judged({ beat: { choice: "tease", confidence: 0.9 }, amused: 0.95 }), resolve(config({ laugh: null })))?.emotion, "playful");
 });
 
-test("a gesture plays only when it isn't still, the judge is sure, and the message moved her or it's a sure one", () => {
+test("a gesture plays only when it isn't still, the judge is sure, and the message moved the character or it's a sure one", () => {
 	const c = resolve(config());
 	const gesture = (j: Partial<Judgement>) => decide(judged(j), c)?.gesture;
 	assert.equal(gesture({ gesture: { choice: "cheer", confidence: 0.8 } }), "cheer");
@@ -247,6 +247,7 @@ test("a failed, late or malformed answer is no beat, and the turn goes on", asyn
 		dir: path.join(ROOT, "extensions/reactions"),
 		handler: "index.ts",
 		hooks: new Map<HookName, HookOptions>([["before_reply", { blocking: true, timeout_ms: 1500 }]]),
+		service: false,
 		requires_env: [KEY],
 		config: cfg,
 		call: reactions as Loaded["call"],
@@ -320,6 +321,7 @@ test("an answer that's too large is refused, whether it says so or not", async (
 			dir: path.join(ROOT, "extensions/reactions"),
 			handler: "index.ts",
 			hooks: new Map<HookName, HookOptions>([["before_reply", { blocking: true, timeout_ms: 1500 }]]),
+			service: false,
 			requires_env: [KEY],
 			config: config(),
 			call: reactions as Loaded["call"],

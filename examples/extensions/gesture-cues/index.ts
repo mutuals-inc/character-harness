@@ -1,5 +1,5 @@
-// Plays a gesture when the character says one of its cue phrases: she waves
-// on "hello", cheers on "you did it". The gesture lands on the phrase itself.
+// Plays a gesture when the character says one of its cue phrases: a wave
+// on "hello", a cheer on "you did it". The gesture lands on the phrase itself.
 //
 // config:
 //   cues: { "hello": wave, "you did it": cheer }   phrase -> gesture

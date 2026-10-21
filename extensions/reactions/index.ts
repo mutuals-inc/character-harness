@@ -1,11 +1,12 @@
-// How the character reacts to what the user just said, shown as she starts to
-// answer: an emotion on her face and maybe a gesture, as a beat at the start
+// How the character reacts to what the user just said, shown as it starts to
+// answer: an emotion on its face and maybe a gesture, as a beat at the start
 // of the reply's first sentence.
 //
 // When the user's message arrives (before_reply, alongside the chat model),
 // one request to Typesafe's Jev asks a few questions about it: what crosses
-// her face, what mood it puts her in, how much it moves her, whether she would
-// hide it, whether it's funny, whether it's about her, and which gesture fits.
+// the character's face, what mood it puts the character in, how much it moves
+// the character, whether the character would hide it, whether it's funny,
+// whether it's about the character, and which gesture fits.
 // The code picks one emotion from the answers (a laugh, the reaction itself
 // when it's strong, or else the mood) and keeps it for the turn; on_sentence
 // puts it on the first sentence. Every threshold is here, never in a rubric:
@@ -17,8 +18,8 @@
 //   model:      { api_key_env, base_url?, model?, timeout_ms? }
 //   about:      a few lines on who the character is, for the judge
 //   context:    how many earlier messages the judge sees (default 6)
-//   beat:       { option: emotion | { emotion, rubric } }   her reaction to the message
-//   settle:     { option: emotion | { emotion, rubric } }   the mood it puts her in
+//   beat:       { option: emotion | { emotion, rubric } }   the reaction to the message
+//   settle:     { option: emotion | { emotion, rubric } }   the mood it puts the character in
 //   gestures:   { gesture: when it fits }
 //   laugh:      { emotion }                                 for a really funny line
 //   thresholds: { unsure, strong, settle, settle_intensity, laugh, gesture_intensity, gesture, gesture_sure }
@@ -57,10 +58,10 @@ interface Option {
 
 interface Thresholds {
 	unsure: number; // a reaction the judge is less sure of than this isn't shown as such
-	strong: number; // a reaction at least this strong is the emotion she answers with
+	strong: number; // a reaction at least this strong is the emotion the reply starts with
 	settle: number; // the mood needs at least this confidence...
-	settle_intensity: number; // ...and a message that moved her at least this much
-	laugh: number; // amused at least this much: she laughs
+	settle_intensity: number; // ...and a message that moved the character at least this much
+	laugh: number; // amused at least this much: the character laughs
 	gesture_intensity: number; // a gesture needs at least this intensity...
 	gesture: number; // ...and at least this confidence
 	gesture_sure: number; // a gesture this sure plays even for a small message (a wave at hello)
@@ -165,7 +166,8 @@ type Question =
 const INTENSITY_LEVELS = 5;
 
 // The questions name the character: asked about "the character", the judge
-// mixed her up with the user ("i got the job" read as being about her). `who`
+// mixed the character up with the user ("i got the job" read as being about
+// the character). `who`
 // is the character's name, or "the character" without one.
 function questions(c: Resolved, name: string): Record<string, Question> {
 	const who = name || "the character";
@@ -390,16 +392,16 @@ export function judgement(answers: Record<string, Answer>, c: Resolved): Judgeme
 // ---- from a judgement to a beat ----
 
 // How strongly the reaction shows: a guarded character shows less, one
-// hearing about herself shows more. 0..1.4.
+// hearing about itself shows more. 0..1.4.
 export function strength(j: Judgement): number {
 	const u = (v: number) => unit(v) ?? 0;
 	return Math.min(1.4, (0.14 + 1.05 * u(j.intensity)) * (1 - 0.55 * u(j.guarded)) * (1 + 0.2 * u(j.personal)));
 }
 
-// The emotion and gesture she starts her answer with, or null for none. One
+// The emotion and gesture the answer starts with, or null for none. One
 // emotion, since the face takes one at a time: a laugh if it's that funny,
 // else the reaction itself if it's strong and the judge is sure of it, else
-// the mood the message puts her in, if it moved her at all.
+// the mood the message puts the character in, if it moved the character at all.
 export function decide(j: Judgement, c: Resolved): Beat | null {
 	const t = c.thresholds;
 	let emotion = "";
@@ -586,7 +588,7 @@ export default async function ({ event, state, config }: Input) {
 		const name = typeof state.character?.name === "string" ? cut(state.character.name, MAX_NAME) : "";
 		const answers = await ask(c, key, { model: c.model, state: situation(state, c), questions: questions(c, name) });
 		const j = judgement(answers, c);
-		if (!j) throw new Error("the judge's answer is missing the reaction or how much it moved her");
+		if (!j) throw new Error("the judge's answer is missing the reaction or how much it moved the character");
 		// too late: the first sentence went out without it, or a newer turn began
 		if (turns.get(session) !== t || t.staged) return;
 		t.beat = decide(j, c);

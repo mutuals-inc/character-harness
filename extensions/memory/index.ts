@@ -1,4 +1,4 @@
-// Long-term memory for a character: what the user tells her about their life,
+// Long-term memory for a character: what the user tells it about their life,
 // kept in their own words, and brought back when something they say later
 // touches it. README.md explains it in full.
 //
@@ -6,8 +6,8 @@
 // the message is worth keeping, which of its words to keep, what kind of thing
 // it is, which memory it is a detail of, whether it makes a memory out of date,
 // and which memory it brings to mind. If the answer arrives within `recall_ms`,
-// the reply gets what it brought to mind; either way the prompt gets what she
-// remembers, from the store, without waiting on anything. The rest of the
+// the reply gets what it brought to mind; either way the prompt gets what the
+// character remembers, from the store, without waiting on anything. The rest of the
 // answer is written to the store after the turn (after_turn), whenever it
 // arrives, so a slow judge never slows a reply down.
 
@@ -167,9 +167,9 @@ function quoted(text: string): string {
 	return JSON.stringify(plain).replaceAll("<", "\\u003c");
 }
 
-// What she remembers, as an indented tree of current memories: the recalled
+// What the character remembers, as an indented tree of current memories: the recalled
 // path first, then the ones costliest to forget, each with what it hangs
-// under, up to `max_items` lines and `max_chars` characters. Empty when she
+// under, up to `max_items` lines and `max_chars` characters. Empty when it
 // remembers nothing. `stale` are memories the message just made out of date,
 // left out though the store hasn't marked them yet.
 //
@@ -392,7 +392,7 @@ export function check({ config }: { config: unknown }) {
 	const r = resolve(config);
 	if (r.recall_ms > RECALL_MAX_MS) warnings.push(`\`recall_ms\` is ${r.recall_ms}: above ${RECALL_MAX_MS}, before_llm may run out of its 1500 ms and the runtime would drop the memory from the prompt`);
 	if (r.request_ms < r.recall_ms) warnings.push("`request_ms` is shorter than `recall_ms`: a request is given up before recall stops waiting for it");
-	if (r.max_memories < 20) warnings.push(`\`max_memories\` is ${r.max_memories}: she'll forget almost at once`);
+	if (r.max_memories < 20) warnings.push(`\`max_memories\` is ${r.max_memories}: the character will forget almost at once`);
 	if (r.shortlist > 200) warnings.push(`\`shortlist\` is ${r.shortlist}: a long list makes every request slower`);
 	return { errors, warnings };
 }

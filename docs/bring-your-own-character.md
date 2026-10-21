@@ -42,7 +42,7 @@ Gestures and talking styles are what the director picks between. List the same n
 
 ## Hair and cloth
 
-Hair, skirts and anything else your model's VRM spring bones describe swing as she moves. The runtime reads them from the model (VRM 1.0 or 0.x) and the player simulates them with its own cloth, mapping each spring's stiffness, gravity, drag and hit radius, and its colliders, onto it. The two simulations differ, so a spring can come out a little stiffer or looser than in other VRM apps; at most 24 chains per model are simulated, and any more are left out. To keep a model's springs still, set `springs: false` under `rig`; worth trying if something about the model looks wrong only once they swing.
+Hair, skirts and anything else your model's VRM spring bones describe swing as the character moves. The runtime reads them from the model (VRM 1.0 or 0.x) and the player simulates them with its own cloth, mapping each spring's stiffness, gravity, drag and hit radius, and its colliders, onto it. The two simulations differ, so a spring can come out a little stiffer or looser than in other VRM apps; at most 24 chains per model are simulated, and any more are left out. To keep a model's springs still, set `springs: false` under `rig`; worth trying if something about the model looks wrong only once they swing.
 
 ## The face
 

@@ -93,15 +93,33 @@ EOF
 rm -rf cooked/vrm out/macos/publish
 hz/hzbuild macos publish
 
-apps=(out/macos/publish/*.app)
-if [ ${#apps[@]} -ne 1 ] || [ ! -d "${apps[0]}" ]; then
+# the engine puts the app in out/macos/publish or a folder inside it
+apps=()
+while IFS= read -r -d '' found; do apps+=("$found"); done < <(find out/macos/publish -maxdepth 2 -name "*.app" -type d -print0)
+if [ ${#apps[@]} -ne 1 ]; then
 	echo "the publish build did not produce one .app in out/macos/publish" >&2
 	exit 1
 fi
 app="${apps[0]}"
+# the publish build doesn't take macos_bundle_id from hzproject.hzt; the id
+# names the app to macOS and the folder it runs in
+bundle_id="$(sed -n 's/^macos_bundle_id //p' hzproject.hzt)"
+[[ "$bundle_id" =~ ^[A-Za-z0-9.-]+$ ]] || { echo "hzproject.hzt has no valid macos_bundle_id" >&2; exit 1; }
+/usr/libexec/PlistBuddy -c "Set :CFBundleIdentifier $bundle_id" "$app/Contents/Info.plist"
 mkdir -p "$app/Contents/Resources"
 cp "$repo_root/LICENSE" "$app/Contents/Resources/LICENSE.txt"
 cp "$repo_root/NOTICE" "$app/Contents/Resources/NOTICE.txt"
+cp assets/vad/LICENSE "$app/Contents/Resources/LICENSE-silero-vad.txt"
+# the publish build leaves the cooked assets out of the app; they go in
+# Resources, and the player links them where it runs (player.c says why)
+[ -f cooked/catalog.hza ] || { echo "the publish build left no cooked/catalog.hza" >&2; exit 1; }
+# a link would ship pointing at this machine
+if [ -n "$(find cooked -type l -print -quit)" ]; then
+	echo "cooked/ has symlinks; remove them before a release" >&2
+	exit 1
+fi
+# gameplay_blocks are the engine's sample assets, which the player doesn't use
+rsync -a --exclude '*.br' --exclude '/vrm/' --exclude '/cook_deps/' --exclude '/gameplay_blocks/' cooked/ "$app/Contents/Resources/cooked/"
 name="$(basename "$app" .app)"
 out="out/release"
 rm -rf "$out"
@@ -136,7 +154,8 @@ if $signed; then
 	rm "$out/notarize.zip"
 	xcrun stapler staple "$app"
 fi
-ditto -c -k --keepParent "$app" "$zip"
+# --norsrc: no ._ files, which other unzip tools leave inside the app
+ditto -c -k --norsrc --keepParent "$app" "$zip"
 
 stage="$out/dmg"
 mkdir -p "$stage"
@@ -152,29 +171,77 @@ if $signed; then
 	spctl -a -t open --context context:primary-signature -vv "$dmg"
 fi
 
-(cd "$out" && shasum -a 256 character-player-* > SHA256SUMS)
-cat "$out/SHA256SUMS"
+sums="$out/SHA256SUMS-macos-arm64"
+(cd "$out" && shasum -a 256 character-player-*) > "$sums"
+cat "$sums"
 
 if ! $create_release; then
 	echo "built $out; no release created"
 	exit 0
 fi
 notes="$out/notes.md"
+source_url="https://github.com/mutuals-inc/character-harness/blob/$tag"
 if $signed; then
 	kind="signed and notarized"
+	first_open="It opens with no warning."
 else
-	kind="unsigned: macOS blocks it on its first start; see \`player/README.md\` for allowing it"
+	kind="unsigned"
+	first_open="macOS blocks it the first time: open it once, then go to System Settings > Privacy & Security, click **Open Anyway** and confirm (on macOS 14 and earlier, Control-click the app and choose Open)."
 fi
 cat > "$notes" <<EOF
-The player app for macOS (Apple Silicon), $kind.
+macOS Apple Silicon player v$version ($kind). Download **$(basename "$dmg")**, open it and drag Character Player to Applications. $first_open The compiled engine and FoxGlove model and animations are included; no Kaigen installation or licence is required.
 
-Built from $tag ($commit) with Kaigen $(sed -n 's/^engine_version //p' hzproject.hzt). See \`player/README.md\` for installing it and pointing the runtime at it.
+### Run the full harness
+
+1. Install Node.js 23.6 or later and download this tag's **Source code (zip)**.
+2. Extract the source, open Terminal in its root (beside package.json), and run \`npm ci --omit=dev\`.
+3. Copy \`.env.example\` to \`.env\` and add your own \`XAI_API_KEY\` and \`ELEVENLABS_API_KEY\`.
+4. Set \`HARNESS_PLAYER\` in \`.env\` to the installed player:
+
+\`\`\`dotenv
+HARNESS_PLAYER="'/Applications/$name.app/Contents/MacOS/'*"
+\`\`\`
+
+5. Run \`npm run check -- characters/foxglove\`, then \`npm start\` from the harness root.
+   The runtime opens the player automatically. Allow the microphone when macOS asks and **speak first**.
+
+The player alone does not run the conversation; Node and provider API keys are required.
+FoxGlove needs no additional animation setup. Provider usage is billed to your accounts.
+For startup problems, read the Terminal output and \`.cache/player.log\`.
+
+See the [harness quickstart]($source_url/README.md#quickstart),
+[macOS installation guide]($source_url/player/README.md#install-a-release-macos),
+[custom character guide]($source_url/docs/bring-your-own-character.md), and
+[architecture]($source_url/docs/architecture.md).
+
+Verify the download with \`shasum -a 256 -c --ignore-missing SHA256SUMS-macos-arm64\`.
+Built from $tag ($commit), Kaigen $(sed -n 's/^engine_version //p' hzproject.hzt).
 
 SHA-256:
-
-\`\`\`
-$(cat "$out/SHA256SUMS")
+\`\`\`text
+$(cat "$sums")
 \`\`\`
 EOF
-gh release create "$tag" --draft --verify-tag --title "v$version - macOS Apple Silicon" --notes-file "$notes" "$dmg" "$zip" "$out/SHA256SUMS"
-echo "draft release $tag created; review it on GitHub and publish it"
+# a rerun puts the files on the draft it made before; a published release is
+# never changed
+if ! draft="$(gh release view "$tag" --json isDraft --jq .isDraft 2>"$out/gh-error")"; then
+	if grep -qi "not found" "$out/gh-error"; then
+		draft=none
+	else
+		cat "$out/gh-error" >&2
+		exit 1
+	fi
+fi
+rm -f "$out/gh-error"
+if [ "$draft" = "false" ]; then
+	echo "release $tag is already published; make a new version instead" >&2
+	exit 1
+elif [ "$draft" = "true" ]; then
+	gh release upload "$tag" --clobber "$dmg" "$zip" "$sums"
+	gh release edit "$tag" --notes-file "$notes"
+	echo "files on draft $tag replaced; review it on GitHub and publish it"
+else
+	# none: no release with this tag yet
+	gh release create "$tag" --draft --verify-tag --title "v$version - macOS Apple Silicon" --notes-file "$notes" "$dmg" "$zip" "$sums"
+	echo "draft release $tag created; review it on GitHub and publish it"
+fi
