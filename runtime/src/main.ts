@@ -116,7 +116,7 @@ server.listen(port, host, () => {
 	console.log(printable(`${character.name} on ws://${host}:${port}${sessionPath} (extensions: ${exts})`));
 	// the player is local: loopback, unless the runtime listens on one address only
 	const reach = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
-	const launch: PlayerLaunch = { url: `ws://${reach}:${port}${sessionPath}`, character: shown };
+	const launch: PlayerLaunch = { url: `ws://${reach}:${port}${sessionPath}`, character: shown, listen: character.listen };
 	const where = process.env.HARNESS_PLAYER;
 	if (!where) {
 		console.log(`start the player with:\n  ${manualStart(launch)}`);

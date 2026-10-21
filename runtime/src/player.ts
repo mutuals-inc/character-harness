@@ -5,7 +5,8 @@
 // `open -a`). Unset, the runtime only serves, and prints what the player needs
 // to connect.
 //
-// The player gets HARNESS_URL and HARNESS_CHARACTER in its environment, and
+// The player gets HARNESS_URL, HARNESS_CHARACTER and HARNESS_LISTEN (the
+// character's `listen` settings as JSON, "" for none) in its environment, and
 // none of the keys: it never calls a provider itself. Its
 // output goes to .cache/player.log; closing the player stops the runtime, and
 // stopping the runtime closes the player.
@@ -13,6 +14,7 @@
 import { spawn } from "node:child_process";
 import { mkdirSync, openSync } from "node:fs";
 import path from "node:path";
+import type { Listen } from "./manifest.ts";
 
 const LOG = path.resolve(import.meta.dirname, "../../.cache/player.log");
 // where the player's output goes, as the console shows it
@@ -21,11 +23,18 @@ export const playerLog = path.relative(process.cwd(), LOG);
 export interface PlayerLaunch {
 	url: string; // the runtime's session socket
 	character: string; // a prepared model file, or the name of a profile cooked into the player
+	listen: Listen;
+}
+
+// `listen` as the player reads it: JSON with only the keys the character sets
+export function listenEnv(listen: Listen): string {
+	return Object.keys(listen).length ? JSON.stringify(listen) : "";
 }
 
 // what to give the player when starting it by hand, for the console
 export function manualStart(launch: PlayerLaunch): string {
-	return `HARNESS_URL=${launch.url} HARNESS_CHARACTER=${JSON.stringify(launch.character)}`;
+	const listen = listenEnv(launch.listen);
+	return `HARNESS_URL=${launch.url} HARNESS_CHARACTER=${JSON.stringify(launch.character)}${listen ? ` HARNESS_LISTEN='${listen}'` : ""}`;
 }
 
 // Starts the player; the returned stop() closes it and anything it started.
@@ -43,6 +52,8 @@ export function startPlayer(
 			...Object.fromEntries(Object.entries(process.env).filter(([k]) => !secrets.has(k))),
 			HARNESS_URL: launch.url,
 			HARNESS_CHARACTER: launch.character,
+			// always set, so one left in the shell does not reach a character without `listen`
+			HARNESS_LISTEN: listenEnv(launch.listen),
 		},
 		stdio: ["ignore", log, log],
 		// its own process group, so stopping it reaches whatever the command starts

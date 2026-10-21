@@ -104,6 +104,28 @@ Models an extension uses belong to that extension, not here. See "The chat model
 | `params` | no | Voice settings passed to the provider, like `stability` and `similarity_boost`. |
 | `drop_tags` | no | Delivery tags removed from each sentence before the voice gets it, like `[quiet, whispers]` for tags it renders too quietly. |
 
+## `listen`
+
+How the player hears the user: when their turn ends, and when talking over the character interrupts it. Optional; a key left out keeps the player's default, so most characters need none of this. A character in a quiet room with one person might end turns sooner; one in a noisy group conversation might wait longer, need more to interrupt, and raise the speech threshold so background talk doesn't start a turn.
+
+```yaml
+listen:
+  end_of_speech_ms: 1500
+  barge_in_ms: 1000
+  speech_threshold: 0.65
+  silence_threshold: 0.45
+```
+
+| Key | Default | Range | What |
+|---|---|---|---|
+| `end_of_speech_ms` | 1200 | 200 to 5000 | How long the user must be quiet before their turn ends. Lower answers sooner but cuts off people who pause mid-sentence. |
+| `barge_in_ms` | 700 | 100 to 3000 | How long the user must talk over the character to interrupt it. |
+| `speech_threshold` | 0.5 | 0.05 to 0.95 | How sure the voice detector must be that it hears speech to start the user's turn. Higher ignores more background noise and distant voices. |
+| `silence_threshold` | 0.35 | 0.05 to 0.95 | Below this, the detector counts the mic as quiet again. Set it with `speech_threshold`, and below it. |
+| `echo_floor` | 0.10 | 0.01 to 0.9 | While the character talks, mic input quieter than this (peak level, 0 to 1) is taken as its own voice coming back through the speakers, not as the user. Raise it for loud speakers without headphones. |
+
+The milliseconds are whole numbers. The runtime passes these to the player in `HARNESS_LISTEN` when it starts it (see `player/README.md`).
+
 ## `rig`
 
 The body. Either a VRM model with the animations it plays, or a profile cooked into the player (FoxGlove's: `player/assets/characters/foxglove.hzt`).

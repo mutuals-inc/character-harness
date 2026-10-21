@@ -72,6 +72,15 @@ export type Rig =
 			springs: boolean; // the model's spring bones swing (hair, skirts)
 	  };
 
+// How the player listens. A key left out keeps the player's default.
+export interface Listen {
+	end_of_speech_ms?: number; // the silence that ends the user's turn
+	barge_in_ms?: number; // how long the user must talk over the character to interrupt it
+	speech_threshold?: number; // speech probability that starts the user's turn
+	silence_threshold?: number; // speech probability that counts as silence again
+	echo_floor?: number; // while the character talks, quieter mic input is taken as its own echo
+}
+
 export interface Character {
 	dir: string;
 	id: string;
@@ -81,6 +90,7 @@ export interface Character {
 	stt: Stt;
 	voice: Voice;
 	rig: Rig;
+	listen: Listen;
 	extensions: Extension[];
 	env_file: string; // absolute
 	manifest: Record<string, unknown>; // as written, for `state.character`
@@ -237,6 +247,38 @@ function readRig(file: string, dir: string, rig: Obj): Rig {
 	return { kind: "model", model: abs, idle, talk, gestures, springs: f("springs").optBool() ?? true };
 }
 
+// [min, max] for each `listen` key, and whether it is a whole number
+const LISTEN: Record<keyof Listen, [number, number, boolean]> = {
+	end_of_speech_ms: [200, 5000, true],
+	barge_in_ms: [100, 3000, true],
+	speech_threshold: [0.05, 0.95, false],
+	silence_threshold: [0.05, 0.95, false],
+	echo_floor: [0.01, 0.9, false],
+};
+
+function readListen(file: string, listen: Obj): Listen {
+	const keys = Object.keys(LISTEN) as (keyof Listen)[];
+	for (const k of Object.keys(listen))
+		if (!keys.includes(k as keyof Listen))
+			throw new ManifestError(`${file}: \`listen.${k}\` is not a key; they are ${keys.join(", ")}`);
+	const out: Listen = {};
+	for (const k of keys) {
+		const v = field(file, listen, "listen", k).optNum();
+		if (v === undefined) continue;
+		const [min, max, whole] = LISTEN[k];
+		if (whole && !Number.isInteger(v)) throw new ManifestError(`${file}: \`listen.${k}\` must be a whole number of milliseconds`);
+		if (v < min || v > max) throw new ManifestError(`${file}: \`listen.${k}\` must be between ${min} and ${max} (got ${v})`);
+		out[k] = v;
+	}
+	// the player's defaults for the two differ, so one alone could cross the other
+	const { speech_threshold: speech, silence_threshold: silence } = out;
+	if ((speech === undefined) !== (silence === undefined))
+		throw new ManifestError(`${file}: \`listen.speech_threshold\` and \`listen.silence_threshold\` go together; set both or neither`);
+	if (speech !== undefined && silence !== undefined && silence >= speech)
+		throw new ManifestError(`${file}: \`listen.silence_threshold\` must be below \`listen.speech_threshold\``);
+	return out;
+}
+
 function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, HookOptions> {
 	const raw = ext.hooks;
 	const hooks = new Map<HookName, HookOptions>();
@@ -370,6 +412,7 @@ export function loadCharacter(dir: string): Character {
 			drop_tags: v("drop_tags").strList().map((t) => t.toLowerCase()),
 		},
 		rig,
+		listen: readListen(file, f("listen").optObj()),
 		extensions,
 		env_file: path.resolve(dir, f("env_file").str()),
 		manifest: m,
