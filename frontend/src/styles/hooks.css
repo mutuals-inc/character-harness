@@ -1,0 +1,193 @@
+.hooks-intro {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 23px;
+  padding: 0 2px;
+  color: #8b9b80;
+  font-size: 12px;
+}
+.hooks-layout {
+  display: grid;
+  grid-template-columns: minmax(390px, 1.2fr) minmax(310px, 1fr);
+  gap: 24px;
+  align-items: start;
+  max-width: 1390px;
+}
+.hook-pipeline {
+  padding: 27px 0 0;
+  overflow: hidden;
+}
+.hook-pipeline > .surface-heading {
+  padding: 0 28px;
+}
+.hook-list {
+  display: flex;
+  flex-direction: column;
+}
+.hook-step {
+  display: flex;
+  text-align: left;
+  align-items: center;
+  gap: 17px;
+  padding: 18px 25px;
+  border-top: 1px solid #edf0e4;
+  border-left: 3px solid transparent;
+  position: relative;
+  min-height: 83px;
+}
+.hook-step.selected {
+  border-left-color: #8da07c;
+  background: #f1f5e9;
+}
+.step-number {
+  font-size: 9px;
+  color: #a5b294;
+  font-variant-numeric: tabular-nums;
+  flex-shrink: 0;
+}
+.hook-step code {
+  font-size: 12px;
+  letter-spacing: -0.2px;
+  color: #7d946c;
+}
+.hook-step small {
+  display: block;
+  font-size: 10px;
+  color: #7c8b6f;
+  line-height: 1.6;
+  margin-top: 6px;
+  max-width: 320px;
+}
+.hook-count {
+  font-size: 9px;
+  display: grid;
+  place-items: center;
+  background: #eaf0df;
+  border-radius: 4px;
+  color: #91a57b;
+  width: 22px;
+  height: 22px;
+  margin-left: auto;
+  flex-shrink: 0;
+}
+.hook-step > svg {
+  color: #afbba1;
+  flex-shrink: 0;
+}
+.pipeline-note {
+  padding: 20px 25px;
+  font-size: 9px !important;
+  color: #adb99f;
+  line-height: 1.9 !important;
+  background: #fafcf6;
+  border-top: 1px solid #e9eddf;
+}
+.pipeline-note svg {
+  margin-right: 5px;
+}
+.surface .code-heading {
+  font-family: "Cascadia Code", Consolas, monospace;
+  font-size: 22px;
+  margin: 15px 0;
+  color: #859d72;
+  letter-spacing: -1px;
+}
+.hook-description {
+  font-size: 12px;
+  color: #718463;
+  margin-bottom: 17px;
+}
+.binding {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 15px 0;
+  border-top: 1px solid #e9efdf;
+  font-size: 11px;
+  color: #8fa77b;
+}
+.binding strong {
+  font-size: 11px;
+  font-weight: 500;
+}
+.binding > span:last-child {
+  margin-left: auto;
+  font-size: 9px;
+  color: #7d8f71;
+}
+.binding .dot {
+  width: 4px;
+  height: 4px;
+}
+.empty-inline {
+  color: #aab89c;
+  font-size: 11px;
+  padding: 15px 0;
+  border-top: 1px solid #e9efdf;
+  line-height: 1.8;
+}
+.extension-card {
+  margin-top: 22px;
+  border-top: 1px solid #e6eddc;
+  padding-top: 6px;
+}
+.extension-card .toggle-row {
+  border: 0;
+  padding-bottom: 6px;
+  color: #819a6e;
+}
+.extension-handler {
+  display: block;
+  font-size: 10px;
+  color: #77896b;
+  margin: 3px 0 16px;
+}
+.hook-tags {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-bottom: 16px;
+}
+.code-tag {
+  background: #f1f6e9;
+  border: 1px solid #e6eeda;
+  color: #99ad88;
+  border-radius: 4px;
+  padding: 5px 7px;
+  font-size: 9px;
+  font-family: Consolas, monospace;
+}
+.extensions .surface-heading {
+  margin-bottom: 14px;
+}
+details {
+  border-top: 1px solid #e7eedc;
+  padding-top: 14px;
+  margin-top: 16px;
+}
+summary {
+  font-size: 10px;
+  color: #9eb18b;
+  cursor: pointer;
+}
+details dl {
+  font-size: 10px;
+  line-height: 1.7;
+  color: #a5b995;
+}
+details dt {
+  margin-top: 12px;
+  color: #94ac83;
+}
+details dd {
+  margin: 3px 0 0;
+  color: #a9ba9b;
+}
+details .subtle {
+  font-size: 10px;
+  margin-top: 15px;
+}
+.hook-details > .info-note {
+  margin-bottom: 20px;
+}

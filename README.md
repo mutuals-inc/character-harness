@@ -39,6 +39,19 @@ The `memory` and `reactions` extensions, if a character uses them, need `TYPESAF
 
 `npm test` runs the tests; they need no keys or network.
 
+## Local web studio (draft)
+
+The optional [frontend](frontend/README.md) puts the animated character, text and
+voice conversation, microphone settings, character editing, extensions and hook
+activity in one browser interface. It uses a browser renderer and the existing
+runtime; it does not open the native player.
+
+Install its dependencies with `npm --prefix frontend install`, then run
+`npm run frontend` and open `http://127.0.0.1:4173`. Local animation previews and
+device tests work without provider keys. Conversations use the character's
+existing `.env` configuration. See the frontend README for renderer differences
+and the draft's current limits.
+
 ## Docs
 
 - `docs/architecture.md`: the turn loop and the event system

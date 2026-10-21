@@ -1,0 +1,327 @@
+.studio-grid {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 302px;
+  gap: 25px;
+  align-items: start;
+}
+.stage-column {
+  min-width: 0;
+}
+.stage {
+  position: relative;
+  border-radius: 12px;
+  overflow: hidden;
+  height: clamp(410px, 52vh, 590px);
+  background: #dbe5e7;
+  isolation: isolate;
+}
+.stage.sky {
+  background: url("/brand/sky.webp") no-repeat center 49% / cover;
+}
+.stage.sky:before {
+  content: "";
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(0deg, #24435840, transparent 50%, #2c586922);
+  z-index: -1;
+}
+.stage.paper {
+  background: #eae8e0;
+}
+.stage.blue {
+  background: #d4e1e5;
+}
+.stage.paper .stage-top,
+.stage.blue .stage-top {
+  color: #4a6672;
+}
+.stage.paper .stage-signature,
+.stage.blue .stage-signature,
+.stage.paper .stage-caption,
+.stage.blue .stage-caption {
+  color: #55717a;
+  text-shadow: none;
+}
+.stage.paper .stage-badge,
+.stage.blue .stage-badge,
+.stage.paper .emotion-label,
+.stage.blue .emotion-label {
+  background: #ffffff70;
+  border-color: #708b8d22;
+}
+.stage.expanded {
+  position: fixed;
+  inset: 0;
+  z-index: 1000;
+  height: 100vh;
+  width: 100vw;
+  border-radius: 0;
+}
+#stage-canvas {
+  position: absolute;
+  inset: 0;
+  z-index: 1;
+}
+#stage-canvas canvas {
+  display: block;
+  outline: none;
+  touch-action: none;
+}
+#stage-loading {
+  position: absolute;
+  inset: 0;
+  display: grid;
+  place-items: center;
+  font-size: 13px;
+  color: #fff;
+  pointer-events: none;
+  z-index: 2;
+  background: #31576a33;
+}
+.stage-top {
+  position: absolute;
+  inset: 20px 21px auto;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  color: white;
+  z-index: 2;
+  pointer-events: none;
+}
+.stage-top button {
+  pointer-events: auto;
+}
+.stage-badge {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 8px;
+  letter-spacing: 1.3px;
+  padding: 7px 10px;
+  border: 1px solid #fff3;
+  border-radius: 4px;
+  background: #fff1;
+}
+.stage-badge .dot {
+  background: #e5edc6;
+  width: 4px;
+  height: 4px;
+}
+.stage-top-right {
+  display: flex;
+  align-items: center;
+  gap: 11px;
+}
+.emotion-label {
+  border: 1px solid #fff3;
+  border-radius: 20px;
+  font-size: 10px;
+  display: flex;
+  gap: 6px;
+  align-items: center;
+  background: #fff1;
+  padding: 6px 10px;
+}
+.emotion-label svg {
+  opacity: 0.85;
+}
+.stage-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  color: inherit;
+  width: 29px;
+  height: 29px;
+  border-radius: 4px;
+  background: #fff2;
+}
+.stage-signature {
+  position: absolute;
+  bottom: 31px;
+  left: 25px;
+  z-index: 2;
+  color: #fff;
+  pointer-events: none;
+  max-width: 26%;
+}
+.stage-signature .eyebrow {
+  color: #f0f3e9;
+  font-size: 7px;
+  letter-spacing: 1.65px;
+  opacity: 0.85;
+}
+.stage-signature h2 {
+  font-family: Georgia, serif;
+  font-size: 27px;
+  letter-spacing: -0.5px;
+  margin-top: 7px;
+}
+.stage-bottom {
+  position: absolute;
+  bottom: 25px;
+  left: 50%;
+  transform: translateX(-50%);
+  z-index: 3;
+  width: max-content;
+  max-width: 60%;
+  text-align: center;
+  pointer-events: none;
+}
+.stage-bottom > * {
+  pointer-events: auto;
+}
+.stage-caption {
+  font-size: 11px;
+  line-height: 1.5;
+  color: #fff;
+  margin: 0 auto 14px;
+  max-width: 450px;
+  text-shadow: 0 1px 8px #244a5a4d;
+  min-height: 17px;
+}
+.stage-controls {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 4px;
+  padding: 7px 10px;
+  background: #fffffff2;
+  border: 1px solid #fffc;
+  border-radius: 40px;
+  width: max-content;
+  max-width: 100%;
+  margin: auto;
+  box-shadow: 0 4px 20px #244a5a15;
+  backdrop-filter: blur(12px);
+}
+.stage-controls .icon-button {
+  width: 33px;
+  height: 33px;
+}
+.stage-controls .icon-button svg {
+  width: 18px;
+  height: 18px;
+}
+.control-divider {
+  width: 1px;
+  height: 17px;
+  background: #dce3dc;
+  margin: 0 5px;
+}
+.audio-bars {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 2px;
+  width: 43px;
+  height: 20px;
+  overflow: hidden;
+}
+.audio-bars i {
+  display: block;
+  width: 2px;
+  height: 4px;
+  border-radius: 1px;
+  background: #a3b39b;
+}
+.stage-renderer {
+  position: absolute;
+  right: 21px;
+  bottom: 21px;
+  z-index: 3;
+  color: #e9f0edb8;
+  font-size: 8px;
+  letter-spacing: 0.45px;
+  pointer-events: none;
+}
+.stage.paper .stage-renderer,
+.stage.blue .stage-renderer {
+  color: #708c8e;
+}
+.mic-active {
+  background: #dfead6 !important;
+  color: #476d55 !important;
+}
+.chat-composer {
+  height: 60px;
+  margin-top: 12px;
+  background: #fffefa;
+  border: 1px solid #e1e5dc;
+  border-radius: 9px;
+  display: flex;
+  align-items: center;
+  gap: 13px;
+  padding: 10px 12px 10px 18px;
+}
+.composer-mark {
+  color: #9aab8c;
+  opacity: 0.8;
+}
+.chat-composer input {
+  border: 0;
+  outline: 0;
+  background: transparent;
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  color: #526655;
+  cursor: text;
+}
+.chat-composer input::placeholder {
+  color: #a1aa9e;
+}
+.chat-composer kbd {
+  font-family: inherit;
+  font-size: 15px;
+  color: #b8bfb2;
+}
+.send-button {
+  width: 34px;
+  height: 34px;
+  display: grid;
+  place-items: center;
+  background: #e9eee1;
+  border: 1px solid #e0e7d5;
+  border-radius: 6px;
+  color: #6c8565;
+}
+.performance-rack {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 16px;
+  margin-top: 22px;
+  padding: 0 3px;
+}
+.performance-rack .eyebrow {
+  font-size: 8px;
+  letter-spacing: 1.1px;
+  color: #7a8e7b;
+}
+.performance-rack p {
+  font-size: 10px;
+  color: #a0a796;
+  margin-top: 6px;
+}
+.gesture-buttons {
+  display: flex;
+  gap: 6px;
+  align-items: center;
+}
+.button.gesture {
+  font-size: 10px;
+  padding: 8px 11px;
+  min-height: 33px;
+  gap: 6px;
+  border-color: #e1e5da;
+  background: #fafbf5;
+  color: #7a8a70;
+}
+.gesture-buttons select {
+  border: 0;
+  background: transparent;
+  font-size: 10px;
+  color: #8c9883;
+  max-width: 75px;
+  padding: 5px;
+}
