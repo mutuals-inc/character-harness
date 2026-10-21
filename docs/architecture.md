@@ -88,6 +88,8 @@ stt:
 ```
 
 - The runtime streams the user's audio and puts the transcript in `input`.
+- It also notes when each utterance was spoken. A voice turn's `input.utterances` lists the speech its line was heard as, oldest first: `[{text, start_ms, end_ms}]`, from the first word's start to the last word's end, in Unix ms on the runtime's clock. The player makes each transcript its own turn, so its lines hold one utterance; an app that joins transcripts into one line gets one per transcript. The app sends the runtime only text, so the runtime finds the utterances by matching the line against the transcripts it sent in the last minute. A line it can't build whole from them, such as one typed or edited, has no `utterances`.
+- An extension can use the times to line the speech up with events from elsewhere, for example to tell who in a group call was speaking. To label a line with a name, it rewrites the user's message in `messages` in `before_llm`.
 - It uses the same `ELEVENLABS_API_KEY` as the voice.
 
 ## The chat model
@@ -159,7 +161,7 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `schema` | state version |
 | `character` | the loaded manifest |
 | `session` | session id, the channel, and the end reason on `on_session_end` |
-| `input` | what came in this turn: `text`, and `channel` (`voice`, `chat` or `screen`, or the `source` of the offer it came from). A turn from an offer also has `offered_by`, the name of the extension that offered it |
+| `input` | what came in this turn: `text`, and `channel` (`voice`, `chat` or `screen`, or the `source` of the offer it came from). A turn from an offer also has `offered_by`, the name of the extension that offered it. A voice turn also has `utterances` when the runtime heard all of its line (see "Speech to text") |
 | `messages` | recent conversation |
 | `prompt` | the system prompt being built |
 | `reply` | the full reply, once written |
