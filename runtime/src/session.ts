@@ -44,6 +44,7 @@ import type { Character } from "./manifest.ts";
 import { STATE_SCHEMA } from "./state.ts";
 import type { Beat, Message, State, Timing } from "./state.ts";
 import { SttRelay } from "./stt.ts";
+import { Heard } from "./utterances.ts";
 import { Tts } from "./tts.ts";
 import { Alignment } from "./align.ts";
 import { Leveler } from "./level.ts";
@@ -209,7 +210,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 	const running: Promise<void>[] = [];
 
 	const elevenKey = process.env[ELEVENLABS_KEY] ?? "";
-	const stt = new SttRelay(character.stt, elevenKey, send);
+	const heard = new Heard();
+	const stt = new SttRelay(character.stt, elevenKey, send, { onFinal: (f) => heard.add(f) });
 	const tts = new Tts(character.voice, elevenKey, (s) => log(`[tts] ${s}`));
 
 	const closeTurn = async (t: Turn) => {
@@ -326,6 +328,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const channel = offered ? offered.source : source === "chat" || source === "screen" ? source : "voice";
 		const input: NonNullable<State["input"]> = { text: lastUser, channel };
 		if (offered) input.offered_by = offered.by;
+		const utterances = channel === "voice" ? heard.match(lastUser) : undefined;
+		if (utterances) input.utterances = utterances;
 		const t: Turn = {
 			id,
 			state: { ...baseState(), turn: id, input, messages, prompt: character.prompt },
