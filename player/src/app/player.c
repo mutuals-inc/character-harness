@@ -126,6 +126,51 @@ hz_internal void player_env(CString name, CString fallback, char *out) {
   out[n] = 0;
 }
 
+// a `listen` value in (0, max), else 0: the engine takes 0 as its default
+hz_internal f64 player_listen_value(PJson *listen, const char *key, f64 max) {
+  PJson *value = pjson_get(listen, key);
+  if (!value)
+    return 0;
+  if (value->kind != PJSON_NUMBER) {
+    log_error("player: % % is not a number; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+              fmt_cstr(key));
+    return 0;
+  }
+  if (value->number > 0 && value->number < max)
+    return value->number;
+  log_error("player: % % is out of range; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+            fmt_cstr(key));
+  return 0;
+}
+
+// the character's `listen` settings onto the voice config. The runtime checks
+// them against the manifest's ranges; this only keeps a value the engine can
+// take, for a player started by hand.
+hz_internal void player_listen(CString text, CharacterVoiceDesc *voice, Allocator *alloc) {
+  if (!text[0])
+    return;
+  PJson *listen = pjson_parse(text, cstr_len(text), alloc);
+  if (!listen || listen->kind != PJSON_OBJECT) {
+    log_error("player: % is not a JSON object; listening keeps its defaults",
+              fmt_cstr(PLAYER_LISTEN_ENV));
+    return;
+  }
+  voice->endpoint_silence_ms = (u32)player_listen_value(listen, "end_of_speech_ms", 60000);
+  voice->barge_confirm_ms = (u32)player_listen_value(listen, "barge_in_ms", 60000);
+  // the two thresholds go together, release below onset, or neither applies
+  f32 hi = (f32)player_listen_value(listen, "speech_threshold", 1);
+  f32 lo = (f32)player_listen_value(listen, "silence_threshold", 1);
+  if (hi > 0 && lo > 0 && lo < hi) {
+    voice->vad_hi = hi;
+    voice->vad_lo = lo;
+  } else if (hi > 0 || lo > 0) {
+    log_error("player: % needs speech_threshold and silence_threshold together, silence "
+              "below speech; both keep their defaults",
+              fmt_cstr(PLAYER_LISTEN_ENV));
+  }
+  voice->echo_peak_floor = (f32)player_listen_value(listen, "echo_floor", 1);
+}
+
 // one-shot per model: finds the face skin and eye materials by the names the
 // profile gives and caches them, so the expression channels can drive them
 ecs_system(player_face_material_resolve_system, EcsIn(EcsModelInstance),
@@ -721,15 +766,18 @@ HZ_APP_API void app_init(AppMemory *memory) {
   PlatformFileData vad = os_read_file(PLAYER_VAD_MODEL, &assets->allocator);
   if (!vad.success)
     log_error("voice: % is missing; run a cook", fmt_cstr(PLAYER_VAD_MODEL));
-  character_voice_init(&state->vs,
-                       &(CharacterVoiceDesc){
-                           .session_url = state->url,
-                           .audio = &state->audio,
-                           .assets = assets,
-                           .alloc = &assets->allocator,
-                           .vad_model = vad.success ? vad.buffer : 0,
-                           .vad_model_len = vad.success ? vad.buffer_len : 0,
-                       });
+  CharacterVoiceDesc voice = {
+      .session_url = state->url,
+      .audio = &state->audio,
+      .assets = assets,
+      .alloc = &assets->allocator,
+      .vad_model = vad.success ? vad.buffer : 0,
+      .vad_model_len = vad.success ? vad.buffer_len : 0,
+  };
+  char listen[PLAYER_ENV_MAX];
+  player_env(PLAYER_LISTEN_ENV, "", listen);
+  player_listen(listen, &voice, &assets->allocator);
+  character_voice_init(&state->vs, &voice);
   // the engine's built-in greeting stays shut: the character speaks first only
   // when an extension offers it a turn, over the offers link
   character_voice_hold_greeting(&state->vs, true);

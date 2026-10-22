@@ -1,4 +1,4 @@
-// The `rig` section of character.yaml. Run with `npm test`.
+// The `rig`, `listen` and extension sections of character.yaml. Run with `npm test`.
 
 import assert from "node:assert/strict";
 import { mkdirSync, mkdtempSync, readFileSync, writeFileSync } from "node:fs";
@@ -108,6 +108,45 @@ test("models.chat.silent_reply is optional and must be a non-empty string", () =
 	assert.equal(loadCharacter(character(rig, "test", ', silent_reply: "[pass]"')).chat.silent_reply, "[pass]");
 	assert.throws(() => loadCharacter(character(rig, "test", ', silent_reply: "  "')), /`models.chat.silent_reply` must be a non-empty string/);
 	assert.throws(() => loadCharacter(character(rig, "test", ", silent_reply: 1")), /`models.chat.silent_reply`/);
+});
+
+// a character with this `listen` block (YAML flow mapping)
+function withListen(listen: string): string {
+	const dir = character(`  engine: ">=0.5.8"\n  model: model.vrm`);
+	const file = path.join(dir, "character.yaml");
+	writeFileSync(file, readFileSync(file, "utf8").replace("extensions: []", `listen: ${listen}\nextensions: []`));
+	return dir;
+}
+
+test("listen is optional, and a key left out keeps the player's default", () => {
+	assert.deepEqual(loadCharacter(character(`  engine: ">=0.5.8"\n  model: model.vrm`)).listen, {});
+	assert.deepEqual(loadCharacter(withListen("{ end_of_speech_ms: 800 }")).listen, { end_of_speech_ms: 800 });
+	assert.deepEqual(loadCharacter(withListen("~")).listen, {});
+	// the thresholds' extremes, and the closest pair allowed
+	assert.deepEqual(loadCharacter(withListen("{ speech_threshold: 0.95, silence_threshold: 0.05 }")).listen, { speech_threshold: 0.95, silence_threshold: 0.05 });
+	assert.deepEqual(loadCharacter(withListen("{ speech_threshold: 0.06, silence_threshold: 0.05 }")).listen, { speech_threshold: 0.06, silence_threshold: 0.05 });
+	assert.deepEqual(
+		loadCharacter(withListen("{ end_of_speech_ms: 1500, barge_in_ms: 1200, speech_threshold: 0.7, silence_threshold: 0.5, echo_floor: 0.2 }")).listen,
+		{ end_of_speech_ms: 1500, barge_in_ms: 1200, speech_threshold: 0.7, silence_threshold: 0.5, echo_floor: 0.2 },
+	);
+});
+
+test("listen refuses misspelt keys, values out of range and crossed thresholds", () => {
+	const bad: [string, RegExp][] = [
+		["{ endpoint_ms: 800 }", /`listen.endpoint_ms` is not a key; they are end_of_speech_ms, /],
+		["{ end_of_speech_ms: 50 }", /`listen.end_of_speech_ms` must be between 200 and 5000 \(got 50\)/],
+		["{ barge_in_ms: 700.5 }", /`listen.barge_in_ms` must be a whole number/],
+		["{ barge_in_ms: fast }", /`listen.barge_in_ms` must be a number/],
+		["{ echo_floor: 1 }", /`listen.echo_floor` must be between 0.01 and 0.9/],
+		["{ speech_threshold: 0.6 }", /set both or neither/],
+		["{ speech_threshold: 0.4, silence_threshold: 0.4 }", /`listen.silence_threshold` must be at least 0.01 below `listen.speech_threshold`/],
+		["{ speech_threshold: 0.5000000001, silence_threshold: 0.5 }", /must be at least 0.01 below/],
+		["{ end_of_speech_ms: .nan }", /`listen.end_of_speech_ms` must be a number/],
+		["{ end_of_speech_ms: ~ }", /`listen.end_of_speech_ms` must be a number/],
+		["{ __proto__: { end_of_speech_ms: 900 } }", /`listen.__proto__` is not a key/],
+		["[800]", /`listen` must be a mapping/],
+	];
+	for (const [listen, error] of bad) assert.throws(() => loadCharacter(withListen(listen)), error, listen);
 });
 
 // a character whose one extension has this extension.yaml (YAML text)

@@ -62,6 +62,11 @@ const secrets = new Set([
 	...(hasEnv ? Object.keys(parseEnv(readFileSync(character.env_file, "utf8"))) : []).filter((k) => !k.startsWith("HARNESS_")),
 ]);
 
+// the player's listening comes from the manifest, so one set in the shell or
+// .env would be replaced without a word
+if (process.env.HARNESS_LISTEN)
+	console.warn(`HARNESS_LISTEN is set in the environment, but the player gets the character's \`listen\` from character.yaml instead; ignoring it`);
+
 const extensions = await loadExtensions(character.extensions).catch((e: unknown) =>
 	fail(e instanceof Error ? e.message : String(e)),
 );
@@ -116,7 +121,7 @@ server.listen(port, host, () => {
 	console.log(printable(`${character.name} on ws://${host}:${port}${sessionPath} (extensions: ${exts})`));
 	// the player is local: loopback, unless the runtime listens on one address only
 	const reach = host === "0.0.0.0" || host === "::" ? "127.0.0.1" : host;
-	const launch: PlayerLaunch = { url: `ws://${reach}:${port}${sessionPath}`, character: shown };
+	const launch: PlayerLaunch = { url: `ws://${reach}:${port}${sessionPath}`, character: shown, listen: character.listen };
 	const where = process.env.HARNESS_PLAYER;
 	if (!where) {
 		console.log(`start the player with:\n  ${manualStart(launch)}`);
