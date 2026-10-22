@@ -128,12 +128,18 @@ hz_internal void player_env(CString name, CString fallback, char *out) {
 
 // a `listen` value in (0, max), else 0: the engine takes 0 as its default
 hz_internal f64 player_listen_value(PJson *listen, const char *key, f64 max) {
-  f64 v = pjson_number(pjson_get(listen, key), 0);
-  if (v > 0 && v < max)
-    return v;
-  if (pjson_get(listen, key))
-    log_error("player: % % is out of range; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+  PJson *value = pjson_get(listen, key);
+  if (!value)
+    return 0;
+  if (value->kind != PJSON_NUMBER) {
+    log_error("player: % % is not a number; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
               fmt_cstr(key));
+    return 0;
+  }
+  if (value->number > 0 && value->number < max)
+    return value->number;
+  log_error("player: % % is out of range; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+            fmt_cstr(key));
   return 0;
 }
 

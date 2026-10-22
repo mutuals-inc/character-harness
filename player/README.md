@@ -117,7 +117,7 @@ The runtime sets the first three when it starts the player.
 |---|---|---|
 | `HARNESS_URL` | `ws://127.0.0.1:8788/session` | the runtime's session socket. The runtime only accepts it with its token (`/session/<token>`), which it passes when it starts the player and prints otherwise |
 | `HARNESS_CHARACTER` | | the character: a path to a `.vrm` / `.glb` (the runtime passes a prepared one), or the name of a profile cooked into the build (`foxglove`) |
-| `HARNESS_LISTEN` | | the character's `listen` settings (`docs/character-manifest.md`) as JSON, like `{"end_of_speech_ms":900}`. A key left out, or a value out of range, keeps the default |
+| `HARNESS_LISTEN` | | the character's `listen` settings as JSON, like `{"end_of_speech_ms":900}`. Set them in `character.yaml` (`docs/character-manifest.md`), not here: the runtime always sets this one and ignores a value in the shell or `.env`. A key left out, or a value the player can't use, keeps the default |
 | `HARNESS_MIC_DEBUG` | `0` | `1` logs what the mic hears twice a second |
 | `HARNESS_PREVIEW` | | for checking a character without a conversation: `talk`, `talk:<style>`, `gesture:<name>` or `emotion:<name>`, repeated every few seconds |
 | `HARNESS_SCREENSHOT` | | saves frame `HARNESS_SCREENSHOT_FRAME` (default 240) to this `.png` and quits |
