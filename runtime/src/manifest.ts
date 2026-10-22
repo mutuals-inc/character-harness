@@ -256,6 +256,9 @@ const LISTEN: Record<keyof Listen, [number, number, boolean]> = {
 	echo_floor: [0.01, 0.9, false],
 };
 
+// the least `listen.silence_threshold` may sit below `listen.speech_threshold`
+const LISTEN_GAP = 0.01;
+
 function readListen(file: string, listen: Obj): Listen {
 	const keys = Object.keys(LISTEN) as (keyof Listen)[];
 	for (const k of Object.keys(listen))
@@ -274,8 +277,10 @@ function readListen(file: string, listen: Obj): Listen {
 	const { speech_threshold: speech, silence_threshold: silence } = out;
 	if ((speech === undefined) !== (silence === undefined))
 		throw new ManifestError(`${file}: \`listen.speech_threshold\` and \`listen.silence_threshold\` go together; set both or neither`);
-	if (speech !== undefined && silence !== undefined && silence >= speech)
-		throw new ManifestError(`${file}: \`listen.silence_threshold\` must be below \`listen.speech_threshold\``);
+	// the player holds them as 32-bit floats, so a hair's gap would close there;
+	// the epsilon keeps 0.06 and 0.05 apart in doubles
+	if (speech !== undefined && silence !== undefined && speech - silence < LISTEN_GAP - 1e-9)
+		throw new ManifestError(`${file}: \`listen.silence_threshold\` must be at least ${LISTEN_GAP} below \`listen.speech_threshold\``);
 	return out;
 }
 

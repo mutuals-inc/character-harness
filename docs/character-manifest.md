@@ -121,10 +121,10 @@ listen:
 | `end_of_speech_ms` | 1200 | 200 to 5000 | How long the user must be quiet before their turn ends. Lower answers sooner but cuts off people who pause mid-sentence. |
 | `barge_in_ms` | 700 | 100 to 3000 | How long the user must talk over the character to interrupt it. |
 | `speech_threshold` | 0.5 | 0.05 to 0.95 | How sure the voice detector must be that it hears speech to start the user's turn. Higher ignores more background noise and distant voices. |
-| `silence_threshold` | 0.35 | 0.05 to 0.95 | Below this, the detector counts the mic as quiet again. Set it with `speech_threshold`, and below it. |
+| `silence_threshold` | 0.35 | 0.05 to 0.95 | Below this, the detector counts the mic as quiet again. Set it with `speech_threshold`, at least 0.01 below it. |
 | `echo_floor` | 0.10 | 0.01 to 0.9 | While the character talks, mic input quieter than this (peak level, 0 to 1) is taken as its own voice coming back through the speakers, not as the user. Raise it for loud speakers without headphones. |
 
-The milliseconds are whole numbers. The runtime passes these to the player in `HARNESS_LISTEN` when it starts it (see `player/README.md`).
+The milliseconds are whole numbers. The runtime passes these to the player in `HARNESS_LISTEN` when it starts it (see `player/README.md`). Players from release v0.1.0 don't read it and keep the defaults, so `listen` needs a player built from this source or a later release.
 
 ## `rig`
 
