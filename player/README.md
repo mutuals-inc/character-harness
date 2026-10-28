@@ -55,6 +55,10 @@ The app keeps what it writes, like the cache of imported models and its logs, in
 
 ## Build (macOS)
 
+For the integrated desktop interface, use the [Windows/macOS Studio guide](../docs/desktop-studio.md).
+It builds this player automatically and keeps it in the background. The steps
+below build and run the standalone player.
+
 Run these steps from `player/`.
 
 1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt`.

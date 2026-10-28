@@ -1,3 +1,4 @@
+description: Offers a conversation starter after the character has been quiet.
 name: dead-air
 handler: index.ts
 # no hooks: it only watches the voice and offers a turn

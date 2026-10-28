@@ -112,6 +112,7 @@ test("dead-air loads as a service with no hooks, and offers a turn once the voic
 	temp.push(dir);
 	cpSync(FOXGLOVE, dir, { recursive: true, filter: (src) => !src.includes(`${path.sep}animations`) });
 	const manifest = readFileSync(path.join(dir, "character.yaml"), "utf8")
+		.replace(/\r\n/g, "\n")
 		.replaceAll("../../extensions", path.resolve(FOXGLOVE, "../../extensions"))
 		.replace(/\nextensions:\n/, `\nextensions:\n  - path: ${DEAD_AIR}\n    config: { after_s: 30 }\n`);
 	writeFileSync(path.join(dir, "character.yaml"), manifest);
