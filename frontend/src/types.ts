@@ -8,6 +8,7 @@ export interface ExtensionSelection {
   config: string;
 }
 export interface AvailableExtension {
+  service?: boolean;
   description?: string;
   id: string;
   name: string;
@@ -15,6 +16,7 @@ export interface AvailableExtension {
   defaultConfig: string;
 }
 export interface ExtensionInfo {
+  service?: boolean;
   enabled: boolean;
   name: string;
   handler: string;

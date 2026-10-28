@@ -93,11 +93,16 @@ export function importExtension(bytes: Uint8Array, root = ROOT): string {
     throw new Error(
       "Extension name must use lowercase letters, numbers, hyphens or underscores.",
     );
-  const hooks = meta.hooks;
+  if (meta.service !== undefined && typeof meta.service !== "boolean")
+    throw new Error("service must be true or false.");
+  const hooks = meta.hooks ?? (meta.service === true ? [] : undefined);
   if (!hooks || typeof hooks !== "object")
     throw new Error("Include lifecycle hooks.");
   const hookNames = Array.isArray(hooks) ? hooks : Object.keys(hooks);
-  if (!hookNames.length || hookNames.some((name) => !HOOKS.includes(name)))
+  if (
+    (!hookNames.length && meta.service !== true) ||
+    hookNames.some((name) => !HOOKS.includes(name))
+  )
     throw new Error("Unknown or missing lifecycle hook.");
   if (!Array.isArray(hooks))
     for (const value of Object.values(hooks)) {
@@ -116,6 +121,8 @@ export function importExtension(bytes: Uint8Array, root = ROOT): string {
     }
   if (typeof meta.handler !== "string") throw new Error("Include a handler.");
   if (/^https?:\/\//.test(meta.handler)) {
+    if (meta.service === true)
+      throw new Error("A service needs a local module handler.");
     const url = new URL(meta.handler);
     if (url.username || url.password)
       throw new Error("Keep credentials in .env.");

@@ -1996,7 +1996,8 @@ dialog #toast:not(.visible) {
   background: var(--paper);
   width: min(100%, 360px);
 }
-.extension-search input {
+.extension-search #extension-search {
+  padding: 12px 0;
   border: 0;
   background: transparent;
   box-shadow: none;

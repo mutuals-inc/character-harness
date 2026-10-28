@@ -221,3 +221,5 @@ see `public/fonts/OFL.txt`.
 ### Extension library
 
 Extensions are shared installed code; enablement, order and YAML configuration belong to each character. The Extensions page searches installed packages and links to the current character's configuration. Upload a trusted ZIP containing `extension.yaml`, its handler, supporting files and optional `defaults.yaml`, at the archive root or in one folder. Installation never executes the handler or enables it. Packages are limited to 20 MB compressed, 50 MB expanded and 200 entries; traversal, environment files and duplicate installed names are rejected. To install another version alongside an existing extension, give it a unique manifest name.
+
+Service-only extensions are listed and can be configured for the native player. Browser sessions currently run lifecycle hooks; they do not consume the native player offers link. See `acceptance.json` for the verified flows and hardware/automation limits.

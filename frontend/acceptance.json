@@ -1,52 +1,65 @@
 {
-  "date": "2026-10-20",
-  "environment": "Windows, Chrome, loopback production and development hosts",
+  "date": "2026-10-28",
+  "environment": "Windows; physical 1920x1080 Chrome display at 100% zoom; in-app Chromium viewport tests",
   "automated": {
-    "frontend": { "passed": 10, "failed": 0 },
-    "runtime": { "passed": 131, "failed": 0, "skipped": 1 },
-    "runtimeSkip": "POSIX owner-only mode bits do not establish NTFS ACL access on Windows.",
+    "frontend": {
+      "passed": 24,
+      "failed": 0
+    },
+    "runtime": {
+      "passed": 183,
+      "failed": 0,
+      "skipped": 1
+    },
+    "runtimeSkip": "POSIX permission bits do not establish NTFS ACL isolation on Windows.",
     "frontendBuildAndTypecheck": "passed",
-    "runtimeTypecheck": "passed",
-    "demoConfiguration": "passed: 0 errors, 0 warnings"
+    "runtimeTypecheck": "passed"
   },
+  "viewports": [
+    {
+      "width": 3840,
+      "height": 2160,
+      "method": "in-app browser override; full management flows and live chat"
+    },
+    {
+      "width": 1920,
+      "height": 1080,
+      "method": "Chrome physical display and override at 100% zoom; management, live chat, drag ordering; uploads repeated in in-app browser"
+    },
+    {
+      "width": 1280,
+      "height": 720,
+      "method": "all four main screens checked for horizontal overflow"
+    },
+    {
+      "width": 1024,
+      "height": 768,
+      "method": "all four main screens, popover bounds and full-height expanded stage checked"
+    }
+  ],
   "browserVerified": [
-    "Both original profile and prepared VRM characters load in the embedded renderer.",
-    "All eight gesture selectors and all nineteen expression selectors were exercised.",
-    "Original comet salute plays as a preview and from a live extension cue.",
-    "Portrait, close-up and wide framing; sky, paper and blue backdrops; camera/pose reset.",
-    "Expanded stage and Escape restoration.",
-    "Identity and temperature edits save; discard restores saved identity; saved identity survives reload.",
-    "Voice stability and similarity edits save; sliders and echo/noise switches respond.",
-    "Preference reset restores input gain to its default; pause and captions switches respond.",
-    "All eight lifecycle hook selectors and extension switches respond.",
-    "Text conversation with comet-cues and director disabled returns a real reply.",
-    "Bundled synthetic greeting flows through MediaStream, AudioWorklet, VAD, ElevenLabs STT, xAI reply, ElevenLabs TTS and the salute hook.",
-    "Muting cancels queued speech and requests; activity records Reply cancelled.",
-    "Text screen context returns a real reply with source screen in the transcript.",
-    "All eight actual lifecycle hooks are present in the exported activity, including on_session_end.",
-    "Activity hook/animation filters, export and clear; new conversation clears the transcript.",
-    "Configuration checks and key-presence status render without exposing key values.",
-    "Transcript JSON contains six actual messages with voice, chat and screen sources.",
-    "Activity JSON contains 68 events, including extension durations.",
-    "Stage export is a 2593 x 957 RGBA PNG with alpha range 0 through 255.",
-    "Phone studio layout was visually inspected before responsive navigation stalled."
+    "Studio: start/end live sessions, actual xAI text replies and ElevenLabs speech events, screen-note submission, live emotion and extension activity.",
+    "Studio: microphone off state, local microphone start/stop and level meter, speaker test, device enumeration, advanced audio controls.",
+    "Studio: sound popover, volume adjustment, mute/unmute, Escape dismissal, three backgrounds, stage expansion/restoration, new conversation.",
+    "Export: actual Chrome download qa-browser-1080-conversation.json written and inspected as JSON.",
+    "Characters: scratch creation from empty identity/personality, uploaded VRM and VRMA gesture, required-field reveal, saved presets/custom connection controls.",
+    "Markdown: heading/list rendering, preserved single line breaks, editor and preview both 280px.",
+    "Character editing: identity save, voice language selection and save, body/animation save, extension enablement/order/configuration save; expanded section preserved after saving.",
+    "Languages: searches by native Portuguese name and Japanese/English names; preset/custom voice controls.",
+    "Extensions: installed library search and empty state, trusted ZIP installation through the browser at 4K and 1080p, package appears without enabling it globally, shortcut opens current character configuration.",
+    "Extension ordering: pointer drag in Chrome, position change feedback, arrow controls, saved order.",
+    "Library: temporary 16-character catalog; 12-card pagination, sort resets/clamps pages, name filtering; current character remains separate and visible.",
+    "Account switcher: six-result pagination, searching, Escape dismissal, collapsed sidebar, selected character applied to Studio and Settings.",
+    "Deletion: cancel and confirm for temporary characters, active deletion restores FoxGlove, built-in FoxGlove stays locked; test files archived for recovery.",
+    "Settings: key presence only until Edit, password field with no existing value, Cancel; captions toggle.",
+    "Updated-main smoke test: service-only extension without hooks appears without breaking bootstrap; native-player limitation identified in UI."
   ],
-  "unverified": [
-    { "feature": "Physical microphone and acoustic interruption", "reason": "Browser permission/capture did not complete. The supplied speech sample verifies the speech pipeline, not hardware." },
-    { "feature": "Alternate hardware output and physical audibility", "reason": "Only the browser audio graph and provider speech events were exercised." },
-    { "feature": "User-selected local audio upload", "reason": "Chrome extension refused upload because file URL access is disabled. That permission was not changed." },
-    { "feature": "Pointer-driven orbit and wheel zoom", "reason": "Camera framing controls passed; no recorded pointer-drag or wheel-input acceptance check was completed." },
-    { "feature": "Complete phone navigation", "reason": "The browser control connection stalled during the responsive navigation pass." }
+  "limitations": [
+    "Chrome file chooser automation requires extension file-URL access. That permission was left unchanged; actual file uploads were verified in the in-app browser.",
+    "Physical live speech recognition and acoustic interruption, alternate speaker hardware and subjective physical audibility were not verified. Local microphone capture and speaker test ran; synthetic chat/TTS/provider events passed.",
+    "Provider key replacement was verified with isolated dummy credentials in automated tests; real configured keys were not replaced during browser checks.",
+    "Native-player extension services can be installed/configured, but autonomous service offers require the native player offers link; browser sessions run lifecycle hooks.",
+    "No claim that every external provider/model or third-party extension combination has been exercised."
   ],
-  "recording": {
-    "path": "../.cache/acceptance/mutuals-studio-walkthrough.mp4",
-    "method": "Real browser screenshot sequence with chapter overlays and synthetic explanatory narration.",
-    "originalAppAudioCaptured": false,
-    "containsMocksOfProviderReplies": false
-  },
-  "evidence": {
-    "transcript": "../.cache/acceptance/evidence/conversation.json",
-    "activity": "../.cache/acceptance/evidence/activity.json",
-    "stage": "../.cache/acceptance/evidence/stage.png"
-  }
+  "cleanup": "Temporary browser characters were deleted through the UI. Temporary pagination fixtures and uploaded QA extension packages were moved under .cache/frontend/test-artifacts. Existing characters and API keys were preserved."
 }

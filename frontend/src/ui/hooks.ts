@@ -22,7 +22,7 @@ function extensionCards() {
       .slice((page - 1) * pageSize, page * pageSize)
       .map(
         (ext) =>
-          `<article class="surface installed-extension"><span class="extension-symbol">${icon("hooks", 22)}</span><h2>${e(ext.name)}</h2><p class="subtle">${e(ext.description || "Adds behavior at specific points in a conversation.")}</p><details class="extension-capabilities"><summary>${ext.hooks.length} lifecycle ${ext.hooks.length === 1 ? "hook" : "hooks"}${icon("down", 15)}</summary><ul>${ext.hooks.map((hook) => `<li>${e(hook.replace(/_/g, " "))}</li>`).join("")}</ul></details></article>`,
+          `<article class="surface installed-extension"><span class="extension-symbol">${icon("hooks", 22)}</span><h2>${e(ext.name)}</h2><p class="subtle">${e(ext.description || "Adds behavior at specific points in a conversation.")}</p><details class="extension-capabilities"><summary>${ext.service ? "Native player service · " : ""}${ext.hooks.length} lifecycle ${ext.hooks.length === 1 ? "hook" : "hooks"}${icon("down", 15)}</summary><ul>${ext.hooks.map((hook) => `<li>${e(hook.replace(/_/g, " "))}</li>`).join("")}</ul></details></article>`,
       )
       .join("") || '<p class="empty-state">No extensions match your search.</p>'
   }</div>${pages > 1 ? `<nav class="extension-pagination" aria-label="Extension pages"><button class="button" data-extension-page="${page - 1}" ${page === 1 ? "disabled" : ""}>Previous</button><span>${page} / ${pages}</span><button class="button" data-extension-page="${page + 1}" ${page === pages ? "disabled" : ""}>Next</button></nav>` : ""}`;

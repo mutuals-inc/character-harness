@@ -8,7 +8,7 @@
     "dev": "node server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.ts --production",
-    "test": "node --test test/*.test.ts"
+    "test": "node --test --test-concurrency=1 test/*.test.ts"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",

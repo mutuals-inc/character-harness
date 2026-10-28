@@ -52,10 +52,14 @@ export function availableExtensions(): AvailableExtension[] {
         return {
           id: `${base}/${e.name}`,
           name: String(manifest.name),
-          description: typeof manifest.description === "string" ? manifest.description : "",
+          description:
+            typeof manifest.description === "string"
+              ? manifest.description
+              : "",
           hooks: Array.isArray(hooks)
             ? hooks.map(String)
-            : Object.keys(hooks as object),
+            : Object.keys((hooks ?? {}) as object),
+          service: manifest.service === true,
           defaultConfig: existsSync(defaults)
             ? readFileSync(defaults, "utf8")
             : "{}\n",
@@ -103,7 +107,7 @@ export function extensionInfo(c: Character): ExtensionInfo[] {
     const hooks: Record<string, { blocking?: boolean; timeout_ms?: number }> =
       Array.isArray(meta.hooks)
         ? Object.fromEntries(meta.hooks.map((h) => [String(h), {}]))
-        : (meta.hooks as Record<
+        : ((meta.hooks ?? {}) as Record<
             string,
             { blocking?: boolean; timeout_ms?: number }
           >);
@@ -116,6 +120,7 @@ export function extensionInfo(c: Character): ExtensionInfo[] {
     return {
       name: String(meta.name),
       handler: String(meta.handler),
+      service: meta.service === true,
       enabled,
       hooks: Object.fromEntries(
         Object.entries(hooks).map(([name, opts]) => [

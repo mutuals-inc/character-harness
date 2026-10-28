@@ -57,3 +57,34 @@ test("extension import rejects traversal, secrets, missing handlers, unknown hoo
     rmSync(root, { recursive: true, force: true });
   }
 });
+
+test("service-only packages match the runtime manifest and require a local module", () => {
+  const root = mkdtempSync(path.join(tmpdir(), "harness-extension-"));
+  try {
+    const service = "name: service-test\nhandler: index.ts\nservice: true\n";
+    assert.equal(
+      importExtension(
+        archive({
+          "extension.yaml": service,
+          "index.ts": "export async function service() {}",
+        }),
+        root,
+      ),
+      "extensions/service-test",
+    );
+    assert.throws(
+      () =>
+        importExtension(
+          archive({
+            "extension.yaml": service
+              .replace("service-test", "remote-test")
+              .replace("index.ts", "https://example.test/handler"),
+          }),
+          root,
+        ),
+      /local module/,
+    );
+  } finally {
+    rmSync(root, { recursive: true, force: true });
+  }
+});
