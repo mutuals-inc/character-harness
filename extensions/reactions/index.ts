@@ -230,7 +230,8 @@ function questions(c: Resolved, name: string): Record<string, Question> {
 // the message.
 function situation(state: Input["state"], c: Resolved) {
 	const ch = state.character ?? {};
-	const messages = (state.messages ?? []).filter((m) => m && typeof m.content === "string");
+	// tool calls and results are not the conversation the judge reads
+	const messages = (state.messages ?? []).filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"));
 	// the conversation ends with the user's message, which is `message`
 	const earlier = messages.at(-1)?.role === "user" ? messages.slice(0, -1) : messages;
 	return {

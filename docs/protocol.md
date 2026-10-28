@@ -18,8 +18,8 @@ So one turn is: speech in (`stt_*`), one `llm` request, then a `tts` request per
 | `{t:"stt_start", utterance?}` | the user started speaking. With an `utterance` (a positive integer), each utterance gets its own transcription session, and `stt_eos` must carry the same number |
 | `{t:"stt_eos", utterance?}` | the user stopped speaking: commit the transcript |
 | `{t:"stt_reset"}` | throw away what was heard |
-| `{t:"llm", id, history, source?}` | write a reply. `history` is the conversation so far, `[{role, content}]` with `role` `user` or `assistant` (others are dropped; the system prompt is the character's), ending with the user's turn. `source` is `voice` (default), `chat` or `screen`; the player sends voice only |
-| `{t:"tts", id, text}` | voice one sentence of the reply. A `tts` with empty text, or the `…` of a silent reply, gets no answer at all |
+| `{t:"llm", id, history, source?}` | write a reply. `history` is the conversation so far, `[{role, content}]` with `role` `user` or `assistant`, plus the tool entries of replies that called tools (see "Tools in the history"), ending with the user's turn. Other roles are dropped; the system prompt is the character's. `source` is `voice` (default), `chat` or `screen`; the player sends voice only |
+| `{t:"tts", id, text}` | voice one sentence of the reply. A `tts` with empty text, the `…` of a silent reply, or the `[acted]` of a reply that only acted, gets no answer at all |
 | `{t:"cancel", id}` | stop the reply or sentence with that `id`, for example when the user interrupts. Nothing more is sent for it: no `llm_done`, `tts_done` or `error`. The `id` may then be used again at once |
 
 ## Runtime to app
@@ -30,7 +30,7 @@ So one turn is: speech in (`stt_*`), one `llm` request, then a `tts` request per
 | `{t:"stt_partial", text, utterance?}` | the transcript so far |
 | `{t:"stt_final", text, utterance?}` | the transcript of a finished utterance |
 | `{t:"llm_delta", id, text}` | the next piece of the reply |
-| `{t:"llm_done", id}` | the reply is complete |
+| `{t:"llm_done", id, entries?}` | the reply is complete. A reply that called tools also has `entries`, what it adds to the history (see "Tools in the history") |
 | binary: `[id: u8][PCM16, 24 kHz, mono]` | voice audio for a sentence, streamed as it is synthesized. The first byte is the low byte of the sentence's `id`, so sentences in flight together need ids that differ in their low byte |
 | `{t:"tts_done", id}` | all audio for sentence `id` has been sent |
 | `{t:"beat", id, bt, emotion, talk, gesture, camera}` | staging for sentence `id`, starting `bt` seconds into its audio: the face's emotion, the body's talking style (`talk`), a one-shot gesture and a camera move. An empty field changes nothing; `none` means none |
@@ -57,6 +57,24 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, text:"…"}` followed by `llm_done`. The app voices `…` as silence: its `tts` gets no answer.
 
 A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.
+
+A turn where the chat model only called tools (see "Tools" in `architecture.md`) is a single `{t:"llm_delta", id, text:"[acted]"}` followed by `llm_done` with its `entries`. The app voices `[acted]` as silence, like `…`.
+
+### Tools in the history
+
+A reply that called tools ends with `{t:"llm_done", id, entries}`. `entries` is what the reply adds to the history, in order, in place of its text: each time the model was asked, what it said and the calls it made, then each call's result, and last what it said after them (`…` when nothing).
+
+```json
+[
+  { "role": "assistant", "content": "Let me look.", "tool_calls": [{ "id": "c1", "name": "weather", "arguments": "{\"city\":\"Lisbon\"}" }] },
+  { "role": "tool", "tool_call_id": "c1", "content": "18°C and sunny" },
+  { "role": "assistant", "content": "It's 18 and sunny." }
+]
+```
+
+The app keeps them as they are and sends them back in later `history`, so the model sees what it did. It may still mark the last one `interrupted`, or cut its `content` to what was voiced. The runtime puts each call's result right after its call, drops a result without one, and gives a call with no result one that says so.
+
+An app that keeps only the reply's text still works: it keeps `[acted]` for a reply that only acted, which the model reads as `…`, and the model doesn't see its earlier calls.
 
 ## The offers link
 

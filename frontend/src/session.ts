@@ -196,6 +196,8 @@ function handleMessage(event: MessageEvent) {
     changed();
     collectSentences(false);
   } else if (message.t === "llm_done" && message.id === replyId) {
+    // a reply that called tools keeps its calls and their results
+    if (message.entries?.length) state.messages.at(-1)!.entries = message.entries;
     collectSentences(true);
     replyId = null;
     if (!sentences.length && speechId === null) status("Ready for a reply");
@@ -244,7 +246,7 @@ function collectSentences(final: boolean) {
   const chunks = remainder.split(/(?<=[.!?。！？])\s+(?![^\[]*\])/u);
   remainder = final ? "" : (chunks.pop() ?? "");
   for (const text of chunks)
-    if (text.trim() && text.trim() !== "…") sentences.push(text.trim());
+    if (text.trim() && text.trim() !== "…" && text.trim() !== "[acted]") sentences.push(text.trim());
   nextSentence();
 }
 
@@ -273,7 +275,7 @@ export async function submit(
   state.messages.push({ role: "user", content: text.trim(), source });
   const history = state.messages
     .filter((m) => m.content.trim())
-    .map(({ role, content }) => ({ role, content }));
+    .flatMap(({ role, content, entries }) => entries ?? [{ role, content }]);
   state.messages.push({ role: "assistant", content: "" });
   replyId = ++sequence;
   remainder = "";

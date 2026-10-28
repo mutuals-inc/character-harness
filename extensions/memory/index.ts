@@ -275,7 +275,8 @@ async function beforeLlm(state: Input["state"], c: Config) {
 		name: typeof state.character.name === "string" ? cut(state.character.name, 100) : "the character",
 		...(typeof state.character.description === "string" ? { description: cut(state.character.description, 300) } : {}),
 	};
-	const history = state.messages ?? [];
+	// tool calls and results are not the conversation
+	const history = (state.messages ?? []).filter((m) => m.role === "user" || m.role === "assistant");
 	// the conversation before the message, for context; the message is sent apart
 	const last = history.length && history[history.length - 1].role === "user" ? history.length - 1 : history.length;
 	const recent = history.slice(Math.max(0, last - 6), last).map((m) => ({ role: m.role, content: cut(String(m.content), 300) }));

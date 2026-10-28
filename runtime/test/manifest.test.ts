@@ -171,3 +171,23 @@ test("an extension that is only a service needs no hooks, but a service needs a 
 		/`service` needs a module handler/,
 	);
 });
+
+test("an extension's tools are read with it, and need a blocking on_tool_call to run them", () => {
+	const yaml = (hooks: string) =>
+		`name: kit\nhandler: index.ts\nhooks:\n${hooks}\ntools:\n  - name: use_item\n    description: Use an item.\n    parameters: { type: object, properties: { item: { type: string } } }\n  - name: wait\n`;
+	const c = loadCharacter(withExtension(yaml("  on_tool_call: { timeout_ms: 3000 }")));
+	assert.deepEqual(c.extensions[0].tools, [
+		{ name: "use_item", description: "Use an item.", parameters: { type: "object", properties: { item: { type: "string" } } }, by: "kit" },
+		{ name: "wait", by: "kit" },
+	]);
+	assert.throws(() => loadCharacter(withExtension(yaml("  after_turn: {}"))), /`tools` needs the `on_tool_call` hook/);
+	assert.throws(() => loadCharacter(withExtension(yaml("  on_tool_call: { blocking: false }"))), /`hooks.on_tool_call` must be blocking/);
+	assert.throws(
+		() => loadCharacter(withExtension("name: kit\nhandler: index.ts\nhooks: [on_tool_call]\ntools:\n  - name: has space\n")),
+		/`tools\[0\].name` must be 1 to 64/,
+	);
+	assert.throws(
+		() => loadCharacter(withExtension("name: kit\nhandler: index.ts\nhooks: [on_tool_call]\ntools:\n  - name: a\n  - name: a\n")),
+		/lists a twice/,
+	);
+});

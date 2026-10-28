@@ -7,7 +7,7 @@ import { existsSync, readFileSync, statSync } from "node:fs";
 import path from "node:path";
 import { parse } from "yaml";
 import { HOOKS } from "./state.ts";
-import type { HookName } from "./state.ts";
+import type { HookName, Tool } from "./state.ts";
 
 export type ChatApi = "chat_completions" | "responses";
 
@@ -46,6 +46,7 @@ export interface Extension {
 	handler: string; // a file in `dir`, or an http(s) URL
 	hooks: Map<HookName, HookOptions>;
 	service: boolean; // runs a long-lived `service` beside its hooks for the whole session
+	tools: Tool[]; // offered every turn; its on_tool_call runs them
 	requires_env: string[];
 	config: unknown;
 }
@@ -308,6 +309,8 @@ function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, Hook
 				throw new ManifestError(`${file}: \`${at}.timeout_ms\` only applies to blocking hooks`);
 			if (timeout !== undefined && timeout <= 0)
 				throw new ManifestError(`${file}: \`${at}.timeout_ms\` must be above 0`);
+			// the model waits on a tool's result
+			if (hook === "on_tool_call" && !blocking) throw new ManifestError(`${file}: \`${at}\` must be blocking`);
 			hooks.set(hook, { blocking, timeout_ms: timeout ?? DEFAULT_TIMEOUT_MS });
 		}
 	} else {
@@ -315,6 +318,32 @@ function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, Hook
 	}
 	if (!hooks.size && !service) throw new ManifestError(`${file}: \`hooks\` names no hook`);
 	return hooks;
+}
+
+// A tool name the chat APIs take
+export const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+
+function readTools(file: string, raw: unknown, name: string, hooks: Map<HookName, HookOptions>): Tool[] {
+	if (raw === undefined || raw === null) return [];
+	if (!Array.isArray(raw)) throw new ManifestError(`${file}: \`tools\` must be a list`);
+	if (raw.length && !hooks.has("on_tool_call"))
+		throw new ManifestError(`${file}: \`tools\` needs the \`on_tool_call\` hook, which runs them`);
+	const tools = raw.map((t, i): Tool => {
+		const at = `tools[${i}]`;
+		if (!isObj(t)) throw new ManifestError(`${file}: \`${at}\` must be a mapping`);
+		const tool = field(file, t, at, "name").str();
+		if (!TOOL_NAME.test(tool))
+			throw new ManifestError(`${file}: \`${at}.name\` must be 1 to 64 letters, digits, _ or -`);
+		const description = field(file, t, at, "description").optStr();
+		const parameters = t.parameters === undefined || t.parameters === null ? undefined : field(file, t, at, "parameters").obj();
+		if (parameters && parameters.type !== "object")
+			throw new ManifestError(`${file}: \`${at}.parameters\` must be a schema of type "object"`);
+		return { name: tool, ...(description !== undefined ? { description } : {}), ...(parameters ? { parameters } : {}), by: name };
+	});
+	const names = tools.map((t) => t.name);
+	const twice = names.find((n, i) => names.indexOf(n) !== i);
+	if (twice) throw new ManifestError(`${file}: \`tools\` lists ${twice} twice`);
+	return tools;
 }
 
 function readExtension(characterFile: string, characterDir: string, entry: unknown, i: number): Extension {
@@ -336,12 +365,15 @@ function readExtension(characterFile: string, characterDir: string, entry: unkno
 	const fromFile = configFile ? readYaml(path.resolve(characterDir, configFile)) : {};
 	const inline = field(characterFile, entry, at, "config").optObj();
 	const config = { ...fromFile, ...inline };
+	const name = f("name").str();
+	const hooks = readHooks(file, ext, service);
 	return {
-		name: f("name").str(),
+		name,
 		dir,
 		handler,
-		hooks: readHooks(file, ext, service),
+		hooks,
 		service,
+		tools: readTools(file, ext.tools, name, hooks),
 		requires_env: readRequiresEnv(file, f("requires_env").list(), config, characterFile, at),
 		config,
 	};

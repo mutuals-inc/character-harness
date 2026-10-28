@@ -36,13 +36,13 @@
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { printable } from "./check.ts";
-import { hasHook, runHook } from "./extensions.ts";
+import { hasHook, runHook, runTool } from "./extensions.ts";
 import type { Loaded, ServiceContext } from "./extensions.ts";
 import { LlmHttpError, LlmStreamError, streamChat } from "./llm.ts";
-import { ELEVENLABS_KEY } from "./manifest.ts";
+import { ELEVENLABS_KEY, TOOL_NAME } from "./manifest.ts";
 import type { Character } from "./manifest.ts";
 import { STATE_SCHEMA } from "./state.ts";
-import type { Beat, Message, State, Timing } from "./state.ts";
+import type { Beat, Message, State, Timing, Tool, ToolCall, ToolChoice, ToolResult } from "./state.ts";
 import { SttRelay } from "./stt.ts";
 import { Heard } from "./utterances.ts";
 import { Tts } from "./tts.ts";
@@ -59,6 +59,10 @@ const PROTOCOL_VERSION = 1;
 // sends this one character and `llm_done`. The app hands it back as a `tts`,
 // which is dropped without a sound.
 const SILENT_TURN = "…";
+// What a turn that only called tools sends instead. The app keeps it in the
+// history like any reply, so a later turn can tell it from a silent reply,
+// and its `tts` gets no answer either.
+const ACTED_TURN = "[acted]";
 
 // How long a finished reply waits for more sentences before after_turn fires.
 // The app sends a sentence's `tts` as a playback slot frees up, so most of a
@@ -69,6 +73,14 @@ const TURN_IDLE_MS = 1500;
 // these, a request is refused rather than spent.
 const MAX_LLM_IN_FLIGHT = 2;
 const MAX_TTS_IN_FLIGHT = 8;
+
+// With tools offered, a model that answered its silent reply is read on for its
+// calls, but stopped once it has written this much more text instead.
+const SILENT_TAIL_CHARS = 200;
+
+// How many times one turn may ask the model: a call whose result the model
+// reads asks it again. The last time it may call none.
+const MAX_ROUNDS = 4;
 
 // A service that fails is started again after a wait that doubles from the
 // first to the last; one that ran this long before failing starts over at the first.
@@ -87,13 +99,85 @@ interface Turn {
 	idle: ReturnType<typeof setTimeout> | undefined;
 }
 
+// what a call with no result in the history gets, since the APIs want one
+const NO_RESULT = "No result.";
+// what the model gets for a call whose tool answered nothing, and for one
+// whose result comes later
+const DONE_RESULT = "Done.";
+const PENDING_RESULT = "Started. The result will come later.";
+
+function toCalls(calls: unknown): ToolCall[] {
+	if (!Array.isArray(calls)) return [];
+	return calls
+		.filter((c): c is ToolCall => typeof c?.id === "string" && c.id !== "" && typeof c?.name === "string" && typeof c?.arguments === "string")
+		.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments }));
+}
+
 function toMessages(history: unknown): Message[] {
 	if (!Array.isArray(history)) return [];
-	return history
+	const ms: Message[] = [];
+	for (const h of history) {
 		// the system prompt is the character's; the app only sends the conversation
-		.filter((h): h is Message => (h?.role === "user" || h?.role === "assistant") && typeof h?.content === "string")
+		if (typeof h?.content !== "string") continue;
 		// the app's `interrupted` marker is not for the model
-		.map((h) => ({ role: h.role, content: h.content }));
+		if (h.role === "user") ms.push({ role: "user", content: h.content });
+		else if (h.role === "assistant") {
+			const calls = toCalls(h.tool_calls);
+			ms.push(calls.length ? { role: "assistant", content: h.content, tool_calls: calls } : { role: "assistant", content: h.content });
+		} else if (h.role === "tool" && typeof h.tool_call_id === "string") ms.push({ role: "tool", content: h.content, tool_call_id: h.tool_call_id });
+	}
+	// The APIs want each call's result right after the message that made it,
+	// and no result without its call
+	const out: Message[] = [];
+	for (let i = 0; i < ms.length; i++) {
+		const m = ms[i];
+		if (m.role === "tool") continue;
+		out.push(m);
+		if (!m.tool_calls) continue;
+		const results = new Map<string, Message>();
+		while (ms[i + 1]?.role === "tool") {
+			const r = ms[++i];
+			if (!results.has(r.tool_call_id!)) results.set(r.tool_call_id!, r);
+		}
+		for (const c of m.tool_calls) out.push(results.get(c.id) ?? { role: "tool", tool_call_id: c.id, content: NO_RESULT });
+	}
+	return out;
+}
+
+// The tools of a turn, as the model gets them: each a name the APIs take and an
+// object schema, and each name once, the first one listed. `warn` is told what
+// was left out. Each comes with the extension that added it.
+function toTools(tools: unknown, warn: (line: string) => void): { tool: Tool; by?: string }[] {
+	if (!Array.isArray(tools)) return [];
+	const out: { tool: Tool; by?: string }[] = [];
+	for (const t of tools) {
+		const name = (t as Tool | null)?.name;
+		if (typeof name !== "string" || !TOOL_NAME.test(name)) {
+			warn(`a tool without a usable name was left out: ${JSON.stringify(name ?? null)}`);
+			continue;
+		}
+		const { description, parameters, by } = t as Tool;
+		if (parameters !== undefined && (typeof parameters !== "object" || parameters === null || parameters.type !== "object")) {
+			warn(`tool ${name} was left out: its parameters must be a schema of type "object"`);
+			continue;
+		}
+		if (out.some((o) => o.tool.name === name)) {
+			warn(`tool ${name} is listed twice; the first one was kept`);
+			continue;
+		}
+		const tool = { name, ...(typeof description === "string" ? { description } : {}), ...(parameters ? { parameters } : {}) };
+		out.push(typeof by === "string" ? { tool, by } : { tool });
+	}
+	return out;
+}
+
+const resultText = (r: ToolResult | undefined) =>
+	r === undefined ? DONE_RESULT : "content" in r ? r.content : "error" in r ? `Error: ${r.error}` : PENDING_RESULT;
+
+function toChoice(c: unknown): ToolChoice | undefined {
+	if (c === "auto" || c === "required" || c === "none") return c;
+	const name = (c as { name?: unknown } | null)?.name;
+	return typeof name === "string" ? { name } : undefined;
 }
 
 // One sentence while it is spoken: its voice timing so far, and the beats
@@ -179,6 +263,13 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 	// request, not id, since the app may reuse the id while one winds down.
 	const cancelledByApp = new WeakSet<AbortController>();
 	const spoken = new Map<number, Spoken>();
+	// what toTools left out, said once a session rather than every turn
+	const warned = new Set<string>();
+	const warnOnce = (line: string) => {
+		if (warned.has(line)) return;
+		warned.add(line);
+		log(line);
+	};
 
 	const send = (obj: unknown) => {
 		if (ws.readyState === WebSocket.OPEN) ws.send(JSON.stringify(obj));
@@ -261,6 +352,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				},
 			},
 			offer: (req) => offers.offer(req, e.name),
+			result: (call, content, req) => offers.offer({ ...req, text: `The result of ${call.name}: ${content}`, source: "tool" }, e.name),
 			voice: {
 				get state() {
 					return offers.voice;
@@ -361,7 +453,15 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 
 		// a service may write its ext while before_llm runs on a copy
 		const beforeLlm = t.state.ext;
-		const prepared = await runHook(exts, "before_llm", t.state, log);
+		// every tool is marked with the extension that added it, so its calls
+		// go to that one's on_tool_call
+		const mark = (s: State, by: string): State =>
+			Array.isArray(s.tools)
+				? { ...s, tools: s.tools.map((tool) => (tool && typeof tool === "object" && typeof tool.by !== "string" ? { ...tool, by } : tool)) }
+				: s;
+		const declared = exts.flatMap((e) => e.tools ?? []);
+		if (declared.length) t.state.tools = structuredClone(declared);
+		const prepared = await runHook(exts, "before_llm", t.state, log, (s, e) => mark(s, e.name));
 		t.state = { ...prepared, ext: applyExt(t.state.ext, extChanges(beforeLlm, prepared.ext)) };
 		if (closed) return;
 		if (cancelledByApp.has(ac)) return finish("cut off by the app");
@@ -371,11 +471,12 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// before_reply has decided, nor while it could still be the model's
 		// silent reply.
 		const token = character.chat.silent_reply ?? "";
-		let maybeSilent = token !== "";
-		let passed = false; // the model answered its silent reply
 		let decided = false;
+		let said = ""; // the text the app gets, every round's
 		const held: string[] = [];
 		const release = () => {
+			// a reply that is only whitespace so far may still be one that only acts
+			if (!said.trim()) return;
 			for (const text of held) send({ t: "llm_delta", id, text });
 			held.length = 0;
 		};
@@ -387,63 +488,149 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			}
 			// the app cut the turn off while it waited; what was held stays unsent
 			if (ac.signal.aborted) return;
-			if (!maybeSilent) release();
+			release();
 		});
 
-		let reply = "";
+		const kept = toTools(t.state.tools, warnOnce);
+		const tools = kept.map((k) => k.tool);
+		const choice = toChoice(t.state.tool_choice);
+		const runCall = async (c: ToolCall): Promise<ToolResult | undefined> => {
+			const owner = c.by ? exts.find((e) => e.name === c.by) : undefined;
+			if (!owner) return { error: `there is no tool named ${c.name}` };
+			if (!owner.hooks.has("on_tool_call")) {
+				warnOnce(`extension ${owner.name} offers tools but has no on_tool_call hook to run them`);
+				return undefined;
+			}
+			return runTool(owner, c, t.state, ac.signal, log);
+		};
+		const apiKey = process.env[character.chat.api_key_env] ?? "";
+		// the app keeps a silent reply as `…`; the model wrote it as the token.
+		// A reply that only called tools said nothing, which the model reads as `…`.
+		const asSaid = (m: Message): Message => {
+			if (m.role !== "assistant" || m.tool_calls) return m;
+			if (m.content.trim() === ACTED_TURN) return { ...m, content: SILENT_TURN };
+			return token && m.content.trim() === SILENT_TURN ? { ...m, content: token } : m;
+		};
+		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? []).map(asSaid)];
+		// what this turn adds to the conversation when it calls tools: each
+		// round's text and calls, their results, and the last round's text
+		const entries: Message[] = [];
+		const calls: ToolCall[] = [];
+		let written = ""; // everything the model wrote, the silent reply too
+		let quiet = false; // the last round answered the silent reply
 		let failure: string | null = null;
-		try {
-			const apiKey = process.env[character.chat.api_key_env] ?? "";
-			// the app keeps a silent reply as `…`; the model wrote it as the token
-			const said = (m: Message): Message =>
-				token && m.role === "assistant" && m.content.trim() === SILENT_TURN ? { ...m, content: token } : m;
-			const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? []).map(said)];
-			for await (const text of streamChat(character.chat, apiKey, request, ac.signal)) {
-				// what arrived in the same chunk as a cancel is not sent
-				if (closed || ac.signal.aborted) break;
-				reply += text;
-				held.push(text);
-				if (maybeSilent) {
-					const lead = reply.trimStart();
-					if (lead.startsWith(token)) {
-						// whatever the model meant to add after it goes unwritten
-						passed = true;
-						ac.abort();
+		for (let round = 0; round < MAX_ROUNDS; round++) {
+			// before_reply may have cancelled the turn already
+			if (closed || ac.signal.aborted) break;
+			const last = round === MAX_ROUNDS - 1;
+			let text = ""; // this round's, as written
+			let spoken = ""; // this round's, as the app gets it
+			let maybeSilent = token !== "";
+			const checking: string[] = []; // pieces that may still be the silent reply
+			let tail = 0; // text after the silent reply
+			const made: ToolCall[] = [];
+			quiet = false;
+			// a round is stopped on its own, so the turn's signal keeps meaning a cut-off
+			const rc = new AbortController();
+			const stop = () => rc.abort();
+			ac.signal.addEventListener("abort", stop, { once: true });
+			const keep = (piece: string) => {
+				// the next round's text goes on after a space
+				if (!spoken && said && !/\s$/.test(said) && !/^\s/.test(piece)) piece = ` ${piece}`;
+				spoken += piece;
+				said += piece;
+				held.push(piece);
+				if (decided) release();
+			};
+			try {
+				const pick = round === 0 ? choice : last ? "none" : undefined;
+				for await (const piece of streamChat(character.chat, apiKey, request, rc.signal, tools, pick)) {
+					// what arrived in the same chunk as a cancel is not sent
+					if (closed || ac.signal.aborted) break;
+					if (typeof piece !== "string") {
+						made.push(piece);
+						continue;
+					}
+					text += piece;
+					written += piece;
+					// the model said nothing, and may still be calling a tool
+					if (quiet) {
+						tail += piece.length;
+						if (tail <= SILENT_TAIL_CHARS) continue;
+						rc.abort();
 						break;
 					}
-					if (!token.startsWith(lead)) maybeSilent = false;
+					if (!maybeSilent) {
+						keep(piece);
+						continue;
+					}
+					checking.push(piece);
+					const lead = text.trimStart();
+					if (lead.startsWith(token)) {
+						// whatever the model meant to add after it goes unwritten
+						quiet = true;
+						if (tools.length) continue;
+						rc.abort();
+						break;
+					}
+					if (token.startsWith(lead)) continue;
+					maybeSilent = false;
+					for (const p of checking.splice(0)) keep(p);
 				}
-				if (decided && !maybeSilent) release();
+				// a reply that ended while it still looked like the start of the token was not it
+				if (!quiet && maybeSilent && !ac.signal.aborted && !closed) for (const p of checking.splice(0)) keep(p);
+			} catch (e) {
+				if (!ac.signal.aborted && !rc.signal.aborted)
+					failure = e instanceof LlmHttpError ? `llm_${e.status}` : e instanceof LlmStreamError ? "llm_failed" : "llm_network";
+			} finally {
+				ac.signal.removeEventListener("abort", stop);
 			}
-		} catch (e) {
-			if (!ac.signal.aborted)
-				failure = e instanceof LlmHttpError ? `llm_${e.status}` : e instanceof LlmStreamError ? "llm_failed" : "llm_network";
+			if (failure || closed || ac.signal.aborted || !made.length) {
+				if (calls.length) entries.push({ role: "assistant", content: quiet || !spoken.trim() ? SILENT_TURN : spoken.trimStart() });
+				break;
+			}
+			// every call goes to the extension whose tool it is, all at once
+			for (const [i, c] of made.entries()) {
+				if (!c.id) c.id = `call_${id}_${round}_${i}`;
+				if (!c.arguments.trim()) c.arguments = "{}";
+				const by = kept.find((k) => k.tool.name === c.name)?.by;
+				if (by) c.by = by;
+			}
+			const results = await Promise.all(made.map(runCall));
+			const asked: Message = { role: "assistant", content: quiet ? "" : spoken.trimStart(), tool_calls: made.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) };
+			const answers = made.map((c, i): Message => ({ role: "tool", tool_call_id: c.id, content: resultText(results[i]) }));
+			for (const [i, c] of made.entries()) calls.push({ ...c, result: answers[i].content });
+			request.push(asked, ...answers);
+			entries.push(asked, ...answers);
+			// the model is asked again when there is a result or an error to read
+			const read = results.some((r) => r !== undefined && !("pending" in r));
+			if (closed || ac.signal.aborted || !read || last) {
+				entries.push({ role: "assistant", content: SILENT_TURN });
+				break;
+			}
 		}
-		// a reply that ended while it still looked like the start of the token was not it
-		if (!passed) {
-			maybeSilent = false;
-			if (decided && !ac.signal.aborted && !closed) release();
-		}
-		// a reply with no text would leave the app waiting on the model
-		if (!failure && !reply.trim() && !ac.signal.aborted && !closed) failure = "llm_empty";
+		if (decided && !ac.signal.aborted && !closed) release();
+		// a reply with no text and no call would leave the app waiting on the model
+		if (!failure && !said.trim() && !quiet && !calls.length && !ac.signal.aborted && !closed) failure = "llm_empty";
 		const cancelled = await replyCancelled;
 		if (closed) return;
 		// a barge-in: the app tore the turn down and expects nothing more for it
 		if (cancelledByApp.has(ac)) return finish("cut off by the app");
 		if (cancelled) return silent();
-		t.state.reply = reply;
+		t.state.reply = written;
+		// the calls ran, so a turn that failed after them still has them
+		if (calls.length) t.state.tool_calls = calls;
 		if (failure) {
 			t.state.error = failure;
 			send({ t: "error", id, text: failure });
 			return finish(`failed: ${failure}`);
 		}
+		const nothing = !said.trim();
 		// the model chose silence: the turn ends like a cancelled one, but after_llm
-		// still sees the reply
-		if (passed) {
-			t.state.cancel = true;
-			send({ t: "llm_delta", id, text: SILENT_TURN });
-		}
-		send({ t: "llm_done", id });
+		// still sees the reply. One that acted still answered, so it isn't cancelled.
+		if (nothing && !calls.length) t.state.cancel = true;
+		if (nothing) send({ t: "llm_delta", id, text: calls.length ? ACTED_TURN : SILENT_TURN });
+		send(entries.length ? { t: "llm_done", id, entries } : { t: "llm_done", id });
 		// the reply is done; after_llm below no longer counts against the limit
 		if (llmStreams.get(id) === ac) llmStreams.delete(id);
 		// sentences arrive while after_llm runs, and their hooks write `ext` too
@@ -451,7 +638,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const after = await runHook(exts, "after_llm", t.state, log);
 		t.state = { ...after, ext: t.state.ext };
 		writeExt(t, extChanges(before, after.ext));
-		finish(passed ? "silent reply, nothing spoken" : `replied, ${reply.length} chars`);
+		const did = calls.length ? `, called ${calls.map((c) => c.name).join(", ")}` : "";
+		finish((nothing ? "silent reply, nothing spoken" : `replied, ${said.length} chars`) + did);
 	};
 
 	// A beat that only changes the face at the start goes out as `emotion`, so it
@@ -495,7 +683,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 	};
 
 	const onTts = async (id: number, text: string) => {
-		if (!text || text.trim() === SILENT_TURN) return;
+		if (!text || text.trim() === SILENT_TURN || text.trim() === ACTED_TURN) return;
 		// a sentence still running on this id stays the one the id names, so it
 		// can be cancelled and counts against the limit
 		const live = spoken.get(id);

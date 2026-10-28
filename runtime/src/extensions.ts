@@ -11,20 +11,27 @@
 // for the whole session beside the hooks (session.ts).
 // An HTTP handler gets the same object as a JSON POST and answers the
 // same way. Keys come from .env, which the runtime loads into process.env.
+//
+// on_tool_call is the one hook that runs on one extension only, the one whose
+// tool the model called, and answers with a result instead of a state:
+//
+//   in:  { event, state, config, call, signal }    out: { result }, or nothing for "done"
 
 import path from "node:path";
 import { pathToFileURL } from "node:url";
 import type { Body, Problems } from "./check.ts";
 import type { Extension } from "./manifest.ts";
 import type { OfferOutcome, OfferRequest, VoiceState } from "./offers.ts";
-import type { HookName, State } from "./state.ts";
+import type { HookName, State, ToolCall, ToolResult } from "./state.ts";
 
 export interface HookInput {
 	event: HookName;
 	state: State;
 	config: unknown;
+	call?: ToolCall; // on_tool_call: the call to run
+	signal?: AbortSignal; // on_tool_call: aborted when the turn is cut off; module handlers only
 }
-type HookOutput = { state?: State } | null | undefined | void;
+type HookOutput = { state?: State; result?: unknown } | null | undefined | void;
 type Handler = (input: HookInput) => HookOutput | Promise<HookOutput>;
 
 type Check = (input: { config: unknown; body: Body }) => Problems | void | Promise<Problems | void>;
@@ -41,6 +48,9 @@ export interface ServiceContext {
 		set(value: unknown): void; // replaces state.ext.<name>; the next hook sees it
 	};
 	offer(req: OfferRequest): Promise<OfferOutcome>;
+	// offers a turn that hands the model the result of a call whose
+	// on_tool_call answered `pending`
+	result(call: ToolCall, content: string, req?: Omit<OfferRequest, "text" | "source">): Promise<OfferOutcome>;
 	voice: {
 		readonly state: VoiceState;
 		readonly since: number; // Date.now() when `state` last changed
@@ -58,9 +68,10 @@ export interface Loaded extends Extension {
 class TimedOut extends Error {}
 
 function httpHandler(url: string): Handler {
-	return async (input) => {
+	return async ({ signal, ...input }) => {
 		const resp = await fetch(url, {
 			method: "POST",
+			signal,
 			headers: { "content-type": "application/json" },
 			body: JSON.stringify(input),
 		});
@@ -110,13 +121,13 @@ const errorText = (e: unknown) => (e instanceof Error ? e.message : String(e));
 // copy and is not waited on; what it returns is dropped.
 //
 // `step`, when given, sees each blocking extension's output as soon as it
-// returns and hands on what the next one sees.
+// returns, with the extension, and hands on what the next one sees.
 export async function runHook(
 	exts: Loaded[],
 	hook: HookName,
 	state: State,
 	log: (line: string) => void,
-	step?: (s: State) => State,
+	step?: (s: State, e: Loaded) => State,
 ): Promise<State> {
 	for (const e of exts) {
 		const opts = e.hooks.get(hook);
@@ -138,7 +149,7 @@ export async function runHook(
 				structuredClone(out.state);
 				state = out.state;
 			}
-			if (step) state = step(state);
+			if (step) state = step(state, e);
 		} catch (err) {
 			log(
 				err instanceof TimedOut
@@ -148,6 +159,42 @@ export async function runHook(
 		}
 	}
 	return state;
+}
+
+// What a tool's result was, from what on_tool_call handed back
+function toResult(r: unknown): ToolResult | undefined {
+	if (r === undefined || r === null) return undefined;
+	const o = r as Record<string, unknown>;
+	if (typeof o.content === "string") return { content: o.content };
+	if (typeof o.error === "string") return { error: o.error };
+	if (o.pending === true) return { pending: true };
+	throw new Error("its result must be { content }, { error } or { pending: true }");
+}
+
+// Runs one call through the on_tool_call of `e`, the extension whose tool it
+// is. Nothing handed back means the tool is done and has nothing to report. A
+// handler that throws or runs out of time gives the model an error instead.
+export async function runTool(
+	e: Loaded,
+	call: ToolCall,
+	state: State,
+	signal: AbortSignal,
+	log: (line: string) => void,
+): Promise<ToolResult | undefined> {
+	const opts = e.hooks.get("on_tool_call");
+	if (!opts) return undefined;
+	try {
+		const input: HookInput = { event: "on_tool_call", state: structuredClone(state), config: e.config, call: { ...call }, signal };
+		const out = await withTimeout(Promise.resolve().then(() => e.call(input)), opts.timeout_ms);
+		return toResult(out && typeof out === "object" ? out.result : undefined);
+	} catch (err) {
+		if (err instanceof TimedOut) {
+			log(`[ext] ${e.name} on_tool_call ${call.name} timed out after ${opts.timeout_ms}ms`);
+			return { error: "the tool took too long" };
+		}
+		log(`[ext] ${e.name} on_tool_call ${call.name} failed: ${errorText(err)}`);
+		return { error: "the tool failed" };
+	}
 }
 
 // True when at least one extension runs on `hook`.

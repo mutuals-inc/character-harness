@@ -127,6 +127,7 @@ function session(
 		app,
 		calls,
 		bodies,
+		lines,
 		logged,
 		// what the app got for one id, without the staging beats
 		sentFor: (id: number) => ws.sent.filter((m) => m.id === id && m.t !== "beat"),
@@ -517,6 +518,386 @@ test("a reply held by before_reply and by the silent reply goes out once both le
 		{ t: "llm_delta", id: 5, text: "[pa" },
 		{ t: "llm_delta", id: 5, text: "use] ok" },
 		{ t: "llm_done", id: 5 },
+	]);
+	await s.close();
+});
+
+// Tools an extension offers the chat model, the calls it makes, and what they
+// hand back.
+
+const sse = (events: unknown[]) => new Response([...events.map((e) => `data: ${JSON.stringify(e)}\n\n`), "data: [DONE]\n\n"].join(""));
+const piece = (index: number, fn: { name?: string; arguments?: string }, id?: string) => ({
+	choices: [{ delta: { tool_calls: [{ index, ...(id ? { id } : {}), function: fn }] } }],
+});
+const said = (text: string) => ({ choices: [{ delta: { content: text } }] });
+const useItem = { name: "use_item", description: "Use an item.", parameters: { type: "object", properties: { item: { type: "string" } } } };
+
+// An extension on several blocking hooks
+function exts(name: string, calls: Partial<Record<HookName, (input: HookInput) => unknown>>, tools: unknown[] = []): Loaded {
+	return {
+		name,
+		dir: "",
+		handler: "",
+		hooks: new Map(Object.keys(calls).map((h) => [h as HookName, { blocking: true, timeout_ms: 5000 }])),
+		tools,
+		requires_env: [],
+		config: {},
+		call: (i: HookInput) => calls[i.event]?.(i),
+	} as unknown as Loaded;
+}
+
+// "kit" offers `tools` on before_llm and runs them with `run`; after_llm keeps
+// the state it saw, and `ran` the calls kit was handed
+function acting(tools: unknown[], run: (input: HookInput) => unknown = () => undefined) {
+	const seen: { state?: Record<string, unknown> } = {};
+	const ran: unknown[] = [];
+	const list = [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools } }),
+			on_tool_call: (i) => {
+				ran.push(i.call);
+				return run(i);
+			},
+		}),
+		exts("after", { after_llm: ({ state }) => { seen.state = { ...state }; } }),
+	];
+	return { exts: list, seen, ran };
+}
+
+// what this turn adds to the history when it called tools
+const asked = (content: string, ...calls: { id: string; name: string; arguments: string }[]) => ({ role: "assistant", content, tool_calls: calls });
+const result = (id: string, content: string) => ({ role: "tool", tool_call_id: id, content });
+const call = (id: string, args = "{}") => ({ id, name: "use_item", arguments: args });
+const done = (entries: unknown[]) => ({ t: "llm_done", id: 5, entries });
+
+test("tools go to the model in its API's shape, each usable name once", async (t) => {
+	const { exts } = acting([useItem, { ...useItem, description: "again" }, { name: "has space" }, { name: "bad", parameters: { type: "array" } }, { name: "wait" }]);
+	const s = session(t, () => reply("ok"), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.bodies[0].tools, [
+		{ type: "function", function: useItem },
+		{ type: "function", function: { name: "wait", description: "", parameters: { type: "object", properties: {} } } },
+	]);
+	assert.equal("tool_choice" in s.bodies[0], false);
+	assert.ok(s.logged("tool use_item is listed twice"));
+	assert.ok(s.logged("tool bad was left out"));
+	await s.close();
+});
+
+test("a turn without tools sends none", async (t) => {
+	const s = session(t, () => reply("ok"));
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.equal("tools" in s.bodies[0], false);
+	await s.close();
+});
+
+test("a call streamed in pieces goes whole to the extension whose tool it is, and one with nothing to report asks no more", async (t) => {
+	const { exts, seen, ran } = acting([useItem]);
+	const s = session(
+		t,
+		() =>
+			sse([
+				said("Here goes."),
+				piece(0, { name: "use_item", arguments: '{"it' }, "call_1"),
+				piece(0, { arguments: 'em":"key"}' }),
+				piece(1, { name: "use_item", arguments: "" }, "call_2"),
+			]),
+		exts,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied, 10 chars, called use_item, use_item"), "the reply");
+	assert.equal(s.calls.length, 1);
+	assert.deepEqual(ran, [{ ...call("call_1", '{"item":"key"}'), by: "kit" }, { ...call("call_2"), by: "kit" }]);
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "Here goes." },
+		done([asked("Here goes.", call("call_1", '{"item":"key"}'), call("call_2")), result("call_1", "Done."), result("call_2", "Done."), { role: "assistant", content: "…" }]),
+	]);
+	assert.deepEqual(seen.state?.tool_calls, [
+		{ ...call("call_1", '{"item":"key"}'), by: "kit", result: "Done." },
+		{ ...call("call_2"), by: "kit", result: "Done." },
+	]);
+	assert.equal(seen.state?.cancel, undefined);
+	await s.close();
+});
+
+test("a result asks the model again in the same turn, which reads the call and its result and goes on speaking", async (t) => {
+	const { exts, seen } = acting([useItem], ({ call }) => ({ result: { content: `used ${JSON.parse(call!.arguments).item}` } }));
+	const s = session(t, (n) => (n === 0 ? sse([said("Let me see."), piece(0, { name: "use_item", arguments: '{"item":"key"}' }, "c")]) : reply("It opened!")), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.equal(s.calls.length, 2);
+	assert.deepEqual((s.bodies[1].messages as unknown[]).slice(1), [
+		...history,
+		{ role: "assistant", content: "Let me see.", tool_calls: [{ id: "c", type: "function", function: { name: "use_item", arguments: '{"item":"key"}' } }] },
+		{ role: "tool", tool_call_id: "c", content: "used key" },
+	]);
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "Let me see." },
+		{ t: "llm_delta", id: 5, text: " It opened!" },
+		done([asked("Let me see.", call("c", '{"item":"key"}')), result("c", "used key"), { role: "assistant", content: "It opened!" }]),
+	]);
+	assert.equal(seen.state?.reply, "Let me see.It opened!");
+	await s.close();
+});
+
+test("a tool that fails, throws or is unknown gives the model an error to read", async (t) => {
+	const { exts } = acting([useItem, { name: "wait" }], ({ call }) => {
+		if (call!.name === "wait") throw new Error("broken");
+		return { result: { error: "no such item" } };
+	});
+	const s = session(
+		t,
+		(n) =>
+			n === 0
+				? sse([piece(0, { name: "use_item", arguments: "{}" }, "a"), piece(1, { name: "wait", arguments: "{}" }, "b"), piece(2, { name: "dance", arguments: "{}" }, "c")])
+				: reply("Oops."),
+		exts,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[1].messages as { role: string; content: string }[]).filter((m) => m.role === "tool").map((m) => m.content), [
+		"Error: no such item",
+		"Error: the tool failed",
+		"Error: there is no tool named dance",
+	]);
+	assert.ok(s.logged("kit on_tool_call wait failed: broken"));
+	await s.close();
+});
+
+test("a result that comes later is promised to the model, and asks it nothing more", async (t) => {
+	const { exts, seen } = acting([useItem], () => ({ result: { pending: true } }));
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item"), "the turn");
+	assert.equal(s.calls.length, 1);
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[acted]" },
+		done([asked("", call("c")), result("c", "Started. The result will come later."), { role: "assistant", content: "…" }]),
+	]);
+	assert.equal(seen.state?.cancel, undefined);
+	await s.close();
+});
+
+test("a model that keeps calling is asked at most four times, the last with no call allowed", async (t) => {
+	const { exts } = acting([useItem], () => ({ result: { content: "again" } }));
+	const s = session(t, (n) => sse([piece(0, { name: "use_item", arguments: "{}" }, `c${n}`)]), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.equal(s.calls.length, 4);
+	assert.deepEqual(s.bodies.map((b) => b.tool_choice), [undefined, undefined, undefined, "none"]);
+	await s.close();
+});
+
+test("a turn's tool_choice goes with its first request only", async (t) => {
+	const s = session(t, (n) => (n === 0 ? sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]) : reply("ok")), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem], tool_choice: { name: "use_item" } } }),
+			on_tool_call: () => ({ result: { content: "fine" } }),
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.bodies[0].tool_choice, { type: "function", function: { name: "use_item" } });
+	assert.equal("tool_choice" in s.bodies[1], false);
+	await s.close();
+});
+
+test("tools an extension declares are offered every turn and run by it", async (t) => {
+	const ran: unknown[] = [];
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]), [
+		exts("kit", { on_tool_call: ({ call }) => { ran.push(call); } }, [{ ...useItem, by: "kit" }]),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(s.bodies[0].tools, [{ type: "function", function: useItem }]);
+	assert.deepEqual(ran, [{ ...call("c"), by: "kit" }]);
+	await s.close();
+});
+
+test("with tools offered, the model's silent reply goes on to its calls, and its text stays unsent", async (t) => {
+	const { exts, seen } = acting([useItem]);
+	const s = session(t, () => sse([said("[pass]"), said(" sneaky"), piece(0, { name: "use_item", arguments: "{}" }, "c")]), exts, quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item"), "the turn");
+	assert.equal(s.calls[0].aborted, false);
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "[acted]" },
+		done([asked("", call("c")), result("c", "Done."), { role: "assistant", content: "…" }]),
+	]);
+	assert.equal(seen.state?.reply, "[pass] sneaky");
+	assert.equal(seen.state?.cancel, undefined);
+	await s.close();
+});
+
+test("the Responses API gets its own tool shape, and the call and its result as items", async (t) => {
+	const { exts, seen } = acting([useItem], () => ({ result: { content: "used" } }));
+	const responses = { ...character, chat: { ...character.chat, api: "responses" } } as Character;
+	const s = session(
+		t,
+		(n) =>
+			n === 0
+				? sse([
+						{ type: "response.output_text.delta", delta: "Fine." },
+						{ type: "response.function_call_arguments.delta", delta: "{}" },
+						{ type: "response.output_item.done", item: { type: "function_call", call_id: "fc", name: "use_item", arguments: '{"item":"key"}' } },
+					])
+				: sse([{ type: "response.output_text.delta", delta: "Done!" }]),
+		exts,
+		responses,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual(s.bodies[0].tools, [{ type: "function", ...useItem }]);
+	assert.deepEqual(s.bodies[1].input, [
+		...history,
+		{ role: "assistant", content: "Fine." },
+		{ type: "function_call", call_id: "fc", name: "use_item", arguments: '{"item":"key"}' },
+		{ type: "function_call_output", call_id: "fc", output: "used" },
+	]);
+	assert.deepEqual(seen.state?.tool_calls, [{ ...call("fc", '{"item":"key"}'), by: "kit", result: "used" }]);
+	await s.close();
+});
+
+test("a cancelled turn runs none of its calls", async (t) => {
+	let after = 0;
+	let ran = 0;
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]), [
+		exts("gate", { before_reply: ({ state }) => ({ state: { ...state, cancel: true } }) }),
+		exts("kit", { before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }), on_tool_call: () => { ran++; } }),
+		exts("after", { after_llm: () => { after++; } }),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: cancelled"), "the turn");
+	assert.equal(after, 0);
+	assert.equal(ran, 0);
+	await s.close();
+});
+
+test("calls without an index are told apart by their ids, and a name repeated on every piece is kept once", async (t) => {
+	const { exts, ran } = acting([useItem]);
+	const bare = (fn: { name?: string; arguments?: string }, id?: string) => ({
+		choices: [{ delta: { tool_calls: [{ ...(id ? { id } : {}), function: fn }] } }],
+	});
+	const s = session(
+		t,
+		(n) => (n === 0 ? sse([bare({ name: "use_item", arguments: '{"it' }, "a"), bare({ name: "use_item", arguments: 'em":"key"}' }), bare({ name: "pass", arguments: "{}" }, "b")]) : noText()),
+		exts,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item, pass"), "the turn");
+	assert.deepEqual(ran, [{ ...call("a", '{"item":"key"}'), by: "kit" }]);
+	await s.close();
+});
+
+test("with tools offered, a model that writes on after its silent reply is stopped", async (t) => {
+	const { exts, seen } = acting([useItem]);
+	const s = session(t, (_n, signal) => streamed(["[pass]", "x".repeat(150), "y".repeat(100), "never read"], signal), exts, quiet);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.equal(s.calls[0].aborted, true);
+	assert.deepEqual(s.sentFor(5), silentTurn);
+	assert.equal(seen.state?.cancel, true);
+	assert.ok((seen.state?.reply as string).startsWith("[pass]"));
+	await s.close();
+});
+
+test("a call goes to the extension that added its tool, the first one when two add it", async (t) => {
+	const ran: string[] = [];
+	const runs = (name: string) => () => { ran.push(name); };
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]), [
+		exts("first", { before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }), on_tool_call: runs("first") }),
+		exts("second", { before_llm: ({ state }) => ({ state: { ...state, tools: [...(state.tools ?? []), useItem] } }), on_tool_call: runs("second") }),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(ran, ["first"]);
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: silent reply"), "the second turn");
+	// the duplicate is logged once a session, not every turn
+	assert.equal(s.lines.filter((l) => l.includes("tool use_item is listed twice")).length, 1);
+	await s.close();
+});
+
+test("a call goes to the extension whose tool the model was sent, whatever came before it", async (t) => {
+	const ran: string[] = [];
+	const broken = { name: "use_item", parameters: { type: "array" } };
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c"), piece(1, { name: "wait", arguments: "{}" }, "d")]), [
+		// its use_item is left out, so the second extension's is the one sent
+		exts("first", { before_llm: ({ state }) => ({ state: { ...state, tools: [broken, { name: "wait" }] } }), on_tool_call: () => { ran.push("first"); } }),
+		// it puts its own wait ahead of the first's
+		exts("second", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [{ name: "wait", description: "mine" }, ...(state.tools ?? []), useItem] } }),
+			on_tool_call: ({ call }) => { ran.push(`second ${call!.name}`); },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(ran.sort(), ["second use_item", "second wait"]);
+	await s.close();
+});
+
+test("whitespace before a reply that only calls a tool isn't sent", async (t) => {
+	const { exts } = acting([useItem]);
+	const s = session(t, () => sse([said("\n"), piece(0, { name: "use_item", arguments: "{}" }, "c")]), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.equal(s.sentFor(5)[0].text, "[acted]");
+	await s.close();
+});
+
+test("calls and results in the history go to the model, each result after its call, and one with no result gets one", async (t) => {
+	const s = session(t, () => reply("ok"), [], quiet);
+	const past = [
+		{ role: "user", content: "talking to someone else" },
+		{ role: "assistant", content: "…" },
+		{ role: "user", content: "use the key" },
+		{ role: "assistant", content: "Sure.", tool_calls: [call("a"), call("b"), { id: "", name: "x", arguments: "{}" }] },
+		{ role: "tool", tool_call_id: "a", content: "used" },
+		{ role: "tool", tool_call_id: "zz", content: "a result with no call" },
+		{ role: "assistant", content: "[acted]" },
+		{ role: "tool", tool_call_id: "a", content: "out of place" },
+		{ role: "user", content: "hi" },
+	];
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	const sent = (s.bodies[0].messages as unknown[]).slice(1);
+	assert.deepEqual(sent, [
+		past[0],
+		{ role: "assistant", content: "[pass]" },
+		past[2],
+		{ role: "assistant", content: "Sure.", tool_calls: [{ id: "a", type: "function", function: { name: "use_item", arguments: "{}" } }, { id: "b", type: "function", function: { name: "use_item", arguments: "{}" } }] },
+		{ role: "tool", tool_call_id: "a", content: "used" },
+		{ role: "tool", tool_call_id: "b", content: "No result." },
+		// a reply that only acted, from an app that kept no calls
+		{ role: "assistant", content: "…" },
+		past[8],
+	]);
+	await s.close();
+});
+
+test("a reply that fails before its calls run runs none", async (t) => {
+	let after = 0;
+	const { exts, ran } = acting([useItem]);
+	exts.push({ ...hook("after_llm", () => { after++; }), name: "count" });
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c"), { error: { message: "boom" } }]), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: failed: llm_failed"), "the failed turn");
+	assert.equal(after, 0);
+	assert.deepEqual(ran, []);
+	await s.close();
+});
+
+test("a reply that fails after its calls ran ends with an error, the calls done", async (t) => {
+	const { exts, ran } = acting([useItem], () => ({ result: { content: "used" } }));
+	const s = session(t, (n) => (n === 0 ? sse([said("On it."), piece(0, { name: "use_item", arguments: "{}" }, "c")]) : new Response("", { status: 500 })), exts);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: failed: llm_500"), "the failed turn");
+	assert.equal(ran.length, 1);
+	assert.deepEqual(s.sentFor(5), [
+		{ t: "llm_delta", id: 5, text: "On it." },
+		{ t: "error", id: 5, text: "llm_500" },
 	]);
 	await s.close();
 });
