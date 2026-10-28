@@ -17,6 +17,9 @@
 // foxglove). The harness runtime always sets it; there is no default.
 #define PLAYER_CHARACTER_ENV "HARNESS_CHARACTER"
 #define PLAYER_ENV_MAX 512
+// the character's `listen` settings as JSON, like {"end_of_speech_ms":900};
+// a key left out keeps the engine's default (player_listen in player.c)
+#define PLAYER_LISTEN_ENV "HARNESS_LISTEN"
 
 // the cooked VAD plan; character_voice_init copies the bytes
 #define PLAYER_VAD_MODEL "cooked/vad/silero_vad_16k.hza"

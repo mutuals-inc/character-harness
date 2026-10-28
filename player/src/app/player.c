@@ -23,6 +23,7 @@
 #include "app/app_character.h"
 #include "app/player.h"
 #include "app/player_vrm.h"
+#include "app/player_offers.h"
 #include "rendering/renderer.h"
 #include "rendering/material.h"
 #include "rendering/camera.h"
@@ -74,6 +75,7 @@ typedef struct AppState {
   f32 mic_debug_peak;    // loudest sample since the last debug line
   u32 mic_debug_frames;
   CharacterVoice vs;
+  PlayerOffers offers;
   f32 talk_hold;
   i32 last_talk_want;
   HzHandleT(GestureSetBlobAsset) gesture_asset;
@@ -122,6 +124,51 @@ hz_internal void player_env(CString name, CString fallback, char *out) {
   u32 n = cstr_len(fallback);
   mem_cpy(out, fallback, n);
   out[n] = 0;
+}
+
+// a `listen` value in (0, max), else 0: the engine takes 0 as its default
+hz_internal f64 player_listen_value(PJson *listen, const char *key, f64 max) {
+  PJson *value = pjson_get(listen, key);
+  if (!value)
+    return 0;
+  if (value->kind != PJSON_NUMBER) {
+    log_error("player: % % is not a number; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+              fmt_cstr(key));
+    return 0;
+  }
+  if (value->number > 0 && value->number < max)
+    return value->number;
+  log_error("player: % % is out of range; it keeps its default", fmt_cstr(PLAYER_LISTEN_ENV),
+            fmt_cstr(key));
+  return 0;
+}
+
+// the character's `listen` settings onto the voice config. The runtime checks
+// them against the manifest's ranges; this only keeps a value the engine can
+// take, for a player started by hand.
+hz_internal void player_listen(CString text, CharacterVoiceDesc *voice, Allocator *alloc) {
+  if (!text[0])
+    return;
+  PJson *listen = pjson_parse(text, cstr_len(text), alloc);
+  if (!listen || listen->kind != PJSON_OBJECT) {
+    log_error("player: % is not a JSON object; listening keeps its defaults",
+              fmt_cstr(PLAYER_LISTEN_ENV));
+    return;
+  }
+  voice->endpoint_silence_ms = (u32)player_listen_value(listen, "end_of_speech_ms", 60000);
+  voice->barge_confirm_ms = (u32)player_listen_value(listen, "barge_in_ms", 60000);
+  // the two thresholds go together, release below onset, or neither applies
+  f32 hi = (f32)player_listen_value(listen, "speech_threshold", 1);
+  f32 lo = (f32)player_listen_value(listen, "silence_threshold", 1);
+  if (hi > 0 && lo > 0 && lo < hi) {
+    voice->vad_hi = hi;
+    voice->vad_lo = lo;
+  } else if (hi > 0 || lo > 0) {
+    log_error("player: % needs speech_threshold and silence_threshold together, silence "
+              "below speech; both keep their defaults",
+              fmt_cstr(PLAYER_LISTEN_ENV));
+  }
+  voice->echo_peak_floor = (f32)player_listen_value(listen, "echo_floor", 1);
 }
 
 // one-shot per model: finds the face skin and eye materials by the names the
@@ -719,17 +766,22 @@ HZ_APP_API void app_init(AppMemory *memory) {
   PlatformFileData vad = os_read_file(PLAYER_VAD_MODEL, &assets->allocator);
   if (!vad.success)
     log_error("voice: % is missing; run a cook", fmt_cstr(PLAYER_VAD_MODEL));
-  character_voice_init(&state->vs,
-                       &(CharacterVoiceDesc){
-                           .session_url = state->url,
-                           .audio = &state->audio,
-                           .assets = assets,
-                           .alloc = &assets->allocator,
-                           .vad_model = vad.success ? vad.buffer : 0,
-                           .vad_model_len = vad.success ? vad.buffer_len : 0,
-                       });
-  // the engine's built-in greeting stays shut: the character never speaks first
+  CharacterVoiceDesc voice = {
+      .session_url = state->url,
+      .audio = &state->audio,
+      .assets = assets,
+      .alloc = &assets->allocator,
+      .vad_model = vad.success ? vad.buffer : 0,
+      .vad_model_len = vad.success ? vad.buffer_len : 0,
+  };
+  char listen[PLAYER_ENV_MAX];
+  player_env(PLAYER_LISTEN_ENV, "", listen);
+  player_listen(listen, &voice, &assets->allocator);
+  character_voice_init(&state->vs, &voice);
+  // the engine's built-in greeting stays shut: the character speaks first only
+  // when an extension offers it a turn, over the offers link
   character_voice_hold_greeting(&state->vs, true);
+  player_offers_init(&state->offers, state->url);
 
   scene_system_create(&state->scene_sys, w, assets, &assets->allocator);
   state->scene = scene_load_file(&state->scene_sys, APP_STAGE_SCENE);
@@ -803,6 +855,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
     app_character_over_hair_update(&state->character, w);
     player_mic_tick(state);
     character_voice_tick(&state->vs, memory->dt);
+    player_offers_tick(&state->offers, &state->vs, memory->dt);
     player_talk_tick(state, memory->dt);
     player_mic_debug_tick(state, memory->dt);
   }

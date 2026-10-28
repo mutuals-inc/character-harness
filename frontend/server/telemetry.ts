@@ -46,6 +46,7 @@ export function instrument(extensions: Loaded[], socket: WebSocket): Loaded[] {
     handler: "telemetry.ts",
     config: {},
     requires_env: [],
+    service: false,
     hooks: new Map(
       HOOKS.map((hook) => [hook, { blocking: true, timeout_ms: 1000 }]),
     ),

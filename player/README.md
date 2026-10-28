@@ -111,12 +111,13 @@ debug executable.
 
 ## Settings
 
-The runtime sets the first two when it starts the player.
+The runtime sets the first three when it starts the player.
 
 | Variable | Default | What |
 |---|---|---|
 | `HARNESS_URL` | `ws://127.0.0.1:8788/session` | the runtime's session socket. The runtime only accepts it with its token (`/session/<token>`), which it passes when it starts the player and prints otherwise |
 | `HARNESS_CHARACTER` | | the character: a path to a `.vrm` / `.glb` (the runtime passes a prepared one), or the name of a profile cooked into the build (`foxglove`) |
+| `HARNESS_LISTEN` | | the character's `listen` settings as JSON, like `{"end_of_speech_ms":900}`. Set them in `character.yaml` (`docs/character-manifest.md`), not here: the runtime always sets this one and ignores a value in the shell or `.env`. A key left out, or a value the player can't use, keeps the default |
 | `HARNESS_MIC_DEBUG` | `0` | `1` logs what the mic hears twice a second |
 | `HARNESS_PREVIEW` | | for checking a character without a conversation: `talk`, `talk:<style>`, `gesture:<name>` or `emotion:<name>`, repeated every few seconds |
 | `HARNESS_SCREENSHOT` | | saves frame `HARNESS_SCREENSHOT_FRAME` (default 240) to this `.png` and quits |
@@ -126,7 +127,7 @@ The runtime sets the first two when it starts the player.
 - Puts the character on the stage, with a portrait camera framed on the upper body.
 - Runs the engine's voice session against the runtime. The engine owns the socket, voice activity detection, playback and lip sync.
 - Applies beats: emotions reach the face, talking styles switch the body's loop, gestures play once, and camera words ease the framing toward `assets/mutuals/camera_moves.hzt`.
-- Never speaks first.
+- Speaks first only when an extension offers it a turn: it keeps a second socket to the runtime, the offers link, reports what its voice is doing there, and takes an offered line as the user's next turn while nobody is speaking (`../docs/protocol.md`, "The offers link"). The engine's own greeting stays off.
 
 ## FoxGlove
 
@@ -151,6 +152,7 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `release-macos.sh`, `macos.entitlements` | builds a release from a tag, signs it (ad hoc, or with a Developer ID and notarized), and attaches it to a draft GitHub release; the entitlements let the app use the mic |
 | `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera |
 | `src/app/player_vrm.c`, `.h` | runtime VRM import and caching: clips, face, rig and the generated character profile |
+| `src/app/player_offers.c`, `.h` | the offers link: the voice's status out, offered turns in |
 | `src/app/player_json.c`, `.h` | a small JSON reader for the VRM extensions and the runtime's clip table |
 | `src/app/app_character.c`, `.h`, `app_emote_clips.c` | loading and swapping the character, emote clips |
 | `src/app/app.c` | the build's entry file, which includes the others |
@@ -159,6 +161,34 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `assets/mutuals/` | the stage, camera moves, emotions, the gesture set of a cooked-in profile, the lip sync profile, an upper-body mask (empty; the engine expects one) |
 | `assets/vad/` | the voice activity model ([Silero VAD](https://github.com/snakers4/silero-vad), MIT licence) |
 | `shaders/mutuals/` | the toon and outline shaders |
+
+## Release tags and download links
+
+Use one tag and GitHub release per version, OS and architecture:
+`v0.1.0-windows-x64` and `v0.1.0-macos-arm64` can both release app version
+`0.1.0`, independently and from different commits. Reserve
+`v0.1.0-linux-x64` for a future Linux build; there is no Linux player release
+script yet. The platform suffix is omitted from the app's product version.
+
+Create and push the tag on the commit you will build, then check it out before
+running the platform's release script. For example:
+
+```powershell
+git tag v0.1.0-windows-x64
+git push origin v0.1.0-windows-x64
+git switch --detach v0.1.0-windows-x64
+```
+
+After publishing, the `Update player download links` GitHub Actions workflow
+updates only the marked downloads block in the root README on the default
+branch. It selects the highest published numeric version per platform,
+includes pre-releases and excludes drafts. Editing, deleting or unpublishing
+a release refreshes the links too. You can also run it manually from Actions
+→ Update player download links → Run workflow, for example after merging this
+workflow for the first time. It needs permission to push README updates to
+the default branch; future branch protection must allow those bot commits.
+GitHub's generic `/releases/latest` link excludes pre-releases and does not
+select a platform, so the README links directly to the selected tags.
 
 ## Releasing (macOS)
 
@@ -178,11 +208,11 @@ Either way, review the draft and publish it. CI doesn't build the player, so rel
 
 ## Releasing (Windows)
 
-From a clean checkout of a `vX.Y.Z` tag, on Windows with the Kaigen SDK linked at
+From a clean checkout of a `vX.Y.Z-windows-x64` tag, on Windows with the Kaigen SDK linked at
 `player/hz`, an activated licence and the native toolchain installed:
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0 -NoRelease
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease
 ```
 
 The script temporarily sets the product version from the tag, removes cached
@@ -218,19 +248,19 @@ source, configure their own keys and run `npm start` as described above.
 For a local preview of uncommitted work, without creating a tag or uploading:
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0 -NoRelease -AllowDirty
+.\player\release-windows.ps1 v0.1.0-windows-x64 -NoRelease -AllowDirty
 ```
 
 To attach the ZIP and checksums to a draft GitHub release, push the tag and run
 without `-NoRelease` (requires `gh` installed and authenticated):
 
 ```powershell
-.\player\release-windows.ps1 v0.1.0
+.\player\release-windows.ps1 v0.1.0-windows-x64
 ```
 
-If a macOS draft already exists for the tag, the Windows assets are added to
-it without replacing its notes or checksums. Existing assets are not silently
-overwritten, and public releases are not modified. Review the draft before
+Each platform has its own tag and release. If a Windows draft already exists
+for this tag, missing assets are added without replacing its notes or checksums.
+Existing assets are not silently overwritten, and public releases are not modified. Review the draft before
 publishing. Artifacts stay under the platform-specific output directory so
 this script does not delete macOS packages.
 

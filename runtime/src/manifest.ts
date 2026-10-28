@@ -17,6 +17,7 @@ export interface ChatModel {
 	api_key_env: string;
 	model: string;
 	params: { temperature?: number; max_tokens?: number; reasoning_effort?: string };
+	silent_reply?: string; // a reply that starts with this is the character staying quiet
 }
 
 export interface Stt {
@@ -44,6 +45,7 @@ export interface Extension {
 	dir: string;
 	handler: string; // a file in `dir`, or an http(s) URL
 	hooks: Map<HookName, HookOptions>;
+	service: boolean; // runs a long-lived `service` beside its hooks for the whole session
 	requires_env: string[];
 	config: unknown;
 }
@@ -70,6 +72,15 @@ export type Rig =
 			springs: boolean; // the model's spring bones swing (hair, skirts)
 	  };
 
+// How the player listens. A key left out keeps the player's default.
+export interface Listen {
+	end_of_speech_ms?: number; // the silence that ends the user's turn
+	barge_in_ms?: number; // how long the user must talk over the character to interrupt it
+	speech_threshold?: number; // speech probability that starts the user's turn
+	silence_threshold?: number; // speech probability that counts as silence again
+	echo_floor?: number; // while the character talks, quieter mic input is taken as its own echo
+}
+
 export interface Character {
 	dir: string;
 	id: string;
@@ -79,6 +90,7 @@ export interface Character {
 	stt: Stt;
 	voice: Voice;
 	rig: Rig;
+	listen: Listen;
 	extensions: Extension[];
 	env_file: string; // absolute
 	manifest: Record<string, unknown>; // as written, for `state.character`
@@ -176,6 +188,7 @@ function readChat(file: string, models: Obj): ChatModel {
 			max_tokens: p("max_tokens").optNum(),
 			reasoning_effort: p("reasoning_effort").optStr(),
 		},
+		silent_reply: f("silent_reply").optStr(),
 	};
 }
 
@@ -234,9 +247,48 @@ function readRig(file: string, dir: string, rig: Obj): Rig {
 	return { kind: "model", model: abs, idle, talk, gestures, springs: f("springs").optBool() ?? true };
 }
 
-function readHooks(file: string, ext: Obj): Map<HookName, HookOptions> {
+// [min, max] for each `listen` key, and whether it is a whole number
+const LISTEN: Record<keyof Listen, [number, number, boolean]> = {
+	end_of_speech_ms: [200, 5000, true],
+	barge_in_ms: [100, 3000, true],
+	speech_threshold: [0.05, 0.95, false],
+	silence_threshold: [0.05, 0.95, false],
+	echo_floor: [0.01, 0.9, false],
+};
+
+// the least `listen.silence_threshold` may sit below `listen.speech_threshold`
+const LISTEN_GAP = 0.01;
+
+function readListen(file: string, listen: Obj): Listen {
+	const keys = Object.keys(LISTEN) as (keyof Listen)[];
+	for (const k of Object.keys(listen))
+		if (!keys.includes(k as keyof Listen))
+			throw new ManifestError(`${file}: \`listen.${k}\` is not a key; they are ${keys.join(", ")}`);
+	const out: Listen = {};
+	for (const k of keys) {
+		const v = field(file, listen, "listen", k).optNum();
+		if (v === undefined) continue;
+		const [min, max, whole] = LISTEN[k];
+		if (whole && !Number.isInteger(v)) throw new ManifestError(`${file}: \`listen.${k}\` must be a whole number of milliseconds`);
+		if (v < min || v > max) throw new ManifestError(`${file}: \`listen.${k}\` must be between ${min} and ${max} (got ${v})`);
+		out[k] = v;
+	}
+	// the player's defaults for the two differ, so one alone could cross the other
+	const { speech_threshold: speech, silence_threshold: silence } = out;
+	if ((speech === undefined) !== (silence === undefined))
+		throw new ManifestError(`${file}: \`listen.speech_threshold\` and \`listen.silence_threshold\` go together; set both or neither`);
+	// the player holds them as 32-bit floats, so a hair's gap would close there;
+	// the epsilon keeps 0.06 and 0.05 apart in doubles
+	if (speech !== undefined && silence !== undefined && speech - silence < LISTEN_GAP - 1e-9)
+		throw new ManifestError(`${file}: \`listen.silence_threshold\` must be at least ${LISTEN_GAP} below \`listen.speech_threshold\``);
+	return out;
+}
+
+function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, HookOptions> {
 	const raw = ext.hooks;
 	const hooks = new Map<HookName, HookOptions>();
+	// an extension that is only a service may run on no hook at all
+	if (service && (raw === undefined || raw === null)) return hooks;
 	const check = (name: unknown): HookName => {
 		if (typeof name !== "string" || !HOOKS.includes(name as HookName))
 			throw new ManifestError(`${file}: \`hooks\` has unknown hook "${String(name)}"; hooks are ${HOOKS.join(", ")}`);
@@ -261,7 +313,7 @@ function readHooks(file: string, ext: Obj): Map<HookName, HookOptions> {
 	} else {
 		throw new ManifestError(`${file}: \`hooks\` is required, as a list of hook names or a map of hook name to options`);
 	}
-	if (!hooks.size) throw new ManifestError(`${file}: \`hooks\` names no hook`);
+	if (!hooks.size && !service) throw new ManifestError(`${file}: \`hooks\` names no hook`);
 	return hooks;
 }
 
@@ -275,6 +327,10 @@ function readExtension(characterFile: string, characterDir: string, entry: unkno
 	const handler = f("handler").str();
 	if (!/^https?:\/\//.test(handler) && !existsSync(path.join(dir, handler)))
 		throw new ManifestError(`${file}: \`handler\` ${handler} does not exist in ${dir}`);
+	const service = f("service").optBool() ?? false;
+	// a service runs inside the runtime, so it needs a module to run
+	if (service && /^https?:\/\//.test(handler))
+		throw new ManifestError(`${file}: \`service\` needs a module handler, not an http(s) URL`);
 	// config can live in its own file next to the character; inline keys win
 	const configFile = field(characterFile, entry, at, "config_file").optStr();
 	const fromFile = configFile ? readYaml(path.resolve(characterDir, configFile)) : {};
@@ -284,7 +340,8 @@ function readExtension(characterFile: string, characterDir: string, entry: unkno
 		name: f("name").str(),
 		dir,
 		handler,
-		hooks: readHooks(file, ext),
+		hooks: readHooks(file, ext, service),
+		service,
 		requires_env: readRequiresEnv(file, f("requires_env").list(), config, characterFile, at),
 		config,
 	};
@@ -360,6 +417,7 @@ export function loadCharacter(dir: string): Character {
 			drop_tags: v("drop_tags").strList().map((t) => t.toLowerCase()),
 		},
 		rig,
+		listen: readListen(file, f("listen").optObj()),
 		extensions,
 		env_file: path.resolve(dir, f("env_file").str()),
 		manifest: m,

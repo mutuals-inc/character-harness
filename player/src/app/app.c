@@ -5,4 +5,5 @@
 #include "app_emote_clips.c"
 #include "player_json.c"
 #include "player_vrm.c"
+#include "player_offers.c"
 #include "player.c"

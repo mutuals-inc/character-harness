@@ -2,6 +2,8 @@
 
 The player app and the runtime talk over one WebSocket for the whole conversation, at `ws://127.0.0.1:8788/session/<token>` by default (`HOST` and `PORT` change it; see `runtime/README.md`). The token is new every time the runtime starts and is given only to the player, in `HARNESS_URL`; a connection without it, or from a web page (any request with an `Origin` header), is refused. Messages are at most 4 MB. Text frames are JSON objects with a `t` field; binary frames carry audio. `runtime/src/session.ts` is the implementation.
 
+Beside it, the player keeps a second, smaller socket, the offers link, through which extensions start turns (see "The offers link" below).
+
 ## Who does what
 
 The app owns the conversation. It captures the mic, decides when the user has finished speaking, keeps the history, sends it with each request, splits the reply into sentences, and asks for each sentence's voice when it has room to play it. The runtime runs the models: speech to text, the chat model and the voice, plus the extensions.
@@ -53,3 +55,25 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 ### Silent replies
 
 When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, text:"…"}` followed by `llm_done`. The app voices `…` as silence: its `tts` gets no answer.
+
+A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.
+
+## The offers link
+
+A service can start a turn by offering a line of input (see "Services" in `extensions.md`). The engine owns the session socket, so offers travel on a second WebSocket at the session's path plus `/offers`: `ws://127.0.0.1:8788/session/<token>/offers`. The same token and Origin rules apply. Messages are JSON text frames of at most 64 KB. The runtime keeps one link, and a newer one replaces it; the link outlives a session socket that reconnects. `runtime/src/offers.ts` is the runtime's end, `player/src/app/player_offers.c` the player's.
+
+The player decides whether an offer becomes a turn, because only it knows whether anyone is speaking. It reports its voice, the runtime offers a line when the voice has been idle long enough, and the player takes it or refuses it. To take it, it sends the offer's text as the user's turn in an ordinary `llm` on the session socket. The runtime recognizes the text and marks the turn as the offer's.
+
+| Message | Direction | When |
+|---|---|---|
+| `{t:"status", voice, epoch}` | app to runtime | when the link opens, and whenever `voice` or `epoch` changes. `voice` is `idle`, `listening`, `thinking`, `speaking` or `offline` (the session socket is down) |
+| `{t:"offer", id, epoch, text}` | runtime to app | a line to take as the user's turn. `epoch` is the one from the last status the runtime saw |
+| `{t:"ack", id, accepted}` | app to runtime | the answer to an offer, within 2 s. Past that the runtime treats it as refused, but an `accepted` that comes later still counts |
+
+The player bumps `epoch` every time its voice leaves `idle`, and right after it takes an offer. It refuses an offer whose `epoch` isn't its current one, or that arrives while its voice isn't idle. So when someone starts speaking while an offer is on its way, the player refuses it, since the runtime decided it while the voice was still quiet. And two offers that arrive together can't both be taken.
+
+After a refusal the runtime sends nothing until the next status, unless a newer status than the one the refusal was decided against has already come in. The player sends a status after every refusal, even when nothing changed. After an `accepted`, the runtime sends nothing until the voice has left `idle` (the offer's turn started) or 5 s have passed.
+
+The runtime keeps the last status, so a session socket that reconnects while the link stays up knows the voice at once. If the link drops between the player taking an offer and the runtime reading the ack, the offer's `llm` still settles it: the runtime matches the turn's user line against the offers it has sent.
+
+A player without the link still works. Its voice reads `offline` to services, and offers wait until they expire.

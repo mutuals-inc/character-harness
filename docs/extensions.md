@@ -16,15 +16,17 @@ hooks:
   before_llm: { blocking: true, timeout_ms: 1000 }
   after_turn: { blocking: false }
 requires_env: [MY_EXTENSION_API_KEY]
+# service: true                      # also runs a service for the whole session (see "Services")
 ```
 
 | Key | Required | What |
 |---|---|---|
 | `name` | yes | Unique among a character's extensions. By convention, its data goes under `state.ext.<name>`. |
 | `handler` | yes | A module file in the folder, or an `http(s)` URL. |
-| `hooks` | yes | A list of hook names, or a map of hook name to options. In the list form every hook is blocking. |
+| `hooks` | yes, unless `service` is set | A list of hook names, or a map of hook name to options. In the list form every hook is blocking. |
 | `hooks.<hook>.blocking` | no | Default `true`. |
 | `hooks.<hook>.timeout_ms` | no | Blocking hooks only. Default `5000`. |
+| `service` | no | `true` to run the handler's exported `service` for the whole session. Module handlers only. See "Services". |
 | `requires_env` | no | Keys the extension needs from `.env`: names, or `{ config: model.api_key_env }` for a key the character's config for the extension names (dotted path). The runtime checks them at startup and keeps them from the player. |
 
 Hooks: `on_session_start`, `before_reply`, `before_llm`, `after_llm`, `on_sentence`, `on_speak`, `after_turn`, `on_session_end`.
@@ -65,6 +67,56 @@ An extension runs with the runtime's access: your keys, your files, the network.
 
 A module may also export `check({ config, body })` (the name is reserved for this), which `npm run check` and `npm start` call before any conversation. `body` is what the player has for the character: `{ emotions, registers, gestures, cameras }`, each a list of names, or `null` when it can't be told from here (a profile this checkout doesn't have, say). It returns `{ errors, warnings }`, lists of messages, or nothing when all is well. The extension picks how serious each problem is: a warning is shown and the character starts anyway; an error is shown and `npm start` stops. The runtime only shows what it gets. The director, for example, makes a missing model or prompt an error, since it can't work without them, and a gesture, emotion, talking style or camera move the character doesn't have a warning, since on stage it would only do nothing.
 
+## Services
+
+A hook runs when the runtime calls it, inside a turn. A service runs on its own for the whole session: it watches something outside the conversation and can start a turn. See "Services and offers" in `architecture.md`.
+
+An extension with `service: true` in its `extension.yaml` exports a `service` function beside its default one. An extension that is only a service needs no `hooks` and no default export.
+
+```ts
+export async function service({ config, session, signal, log, ext, offer, voice }) {
+  // runs until `signal` is aborted, when the session ends
+}
+```
+
+| Field | What |
+|---|---|
+| `config` | the character's config for the extension, as its hooks get it |
+| `session` | `{ id, channel }` |
+| `signal` | an `AbortSignal` the runtime aborts when the session ends. Stop when it fires |
+| `log(line)` | writes a line to the runtime's log |
+| `ext.get()` / `ext.set(value)` | read and replace the extension's own `state.ext.<name>`. A write is kept for the session, and the next hook sees it, even one running on the turn already open |
+| `offer(req)` | offers a turn (below). Resolves to `accepted`, `expired` or `closed` |
+| `voice.state` | what the player's voice is doing: `idle`, `listening`, `thinking`, `speaking`, or `offline` when the player has no offers link |
+| `voice.since` | `Date.now()` when `voice.state` last changed |
+| `voice.on(fn)` | calls `fn(state)` on every change; returns the function that stops it |
+
+The runtime starts each service just after `on_session_start`. When the session ends it aborts `signal`, waits up to 2 seconds for the services to return, then runs `on_session_end`. A service that throws is logged and started again, after a wait that doubles from 1 second up to 30. One that returns is done, and is not started again. Either way, when a run ends its `signal` is aborted and its `voice.on` listeners are removed, so a service that only reacts to the voice keeps running until `signal` fires.
+
+A service writes only its own `ext.<name>`. To give a hook something to put in the prompt, the service writes it there and the hook reads `state.ext.<name>`. To learn what happened in a turn, a hook of the same extension writes it there and the service reads it with `ext.get()`.
+
+### Offers
+
+`offer(req)` asks the runtime to start a turn with a line of input:
+
+```ts
+const outcome = await offer({ text: "@ana asked in chat: what's your favorite song?", source: "chat" });
+```
+
+| Key | Default | What |
+|---|---|---|
+| `text` | required | the user's side of the turn, up to 4000 characters, with no control characters other than newlines and tabs. The character answers it; it is not said as written |
+| `source` | `offer` | the turn's `input.channel`, a lowercase word like `chat`, `screen` or `idle` |
+| `quiet_ms` | `2000` | how long the voice must have been idle before the offer goes out, so the character doesn't take the floor the moment it stops. At most a day |
+| `ttl_ms` | `10000` | how long the offer may wait. Past it, the offer resolves `expired`. At most a day |
+| `priority` | `0` | higher goes first; among equals, the oldest |
+
+The runtime keeps a queue per session and hands one offer at a time to the player, only while its voice is idle. After the player takes one, nothing else goes out until that turn has started, or the voice has stayed idle for 5 s more. If the player refuses one because someone just started speaking, it goes back in the queue and waits for the next quiet moment. A taken offer is an ordinary turn. The player sends it back as the user's line, and its `input` has `channel` set to the offer's `source` and `offered_by` set to the extension's name.
+
+`offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
+
+`examples/extensions/dead-air` is the smallest service: it offers one line once the voice has been quiet for a while.
+
 ## Blocking and non-blocking
 
 - **Blocking** (default): the turn waits; the returned state goes to the next extension.
@@ -84,6 +136,7 @@ The extensions in `extensions/` ship with the harness and show the shape:
 | `director` | `on_sentence` blocking (10 s), `on_session_end` non-blocking | asks a second model to stage each line: an emotion, a talking style, a gesture and a camera move per phrase |
 | `memory` | `before_llm` blocking (1.5 s), `after_turn` and `on_session_end` non-blocking | asks Typesafe's Jev whether what the user said is worth keeping, keeps it in their own words in a tree per character, marks what it makes out of date, and puts what the character remembers in the prompt. See `extensions/memory/README.md` |
 | `reactions` | `before_reply` blocking (1.5 s), `on_sentence` blocking (500 ms), `on_session_end` non-blocking | asks Typesafe's Jev how the character takes the user's message, and starts the reply's first sentence with a beat: the emotion that fits and maybe a gesture. List it after `emotion-tags` and before `director`. See `extensions/reactions/README.md` |
+| `dead-air` (in `examples/extensions/`) | none; a service | speaks up after a while of quiet: it offers the character a line saying nobody has spoken, then waits out a cooldown. See `examples/extensions/dead-air/README.md` |
 
 ### The director's config
 
@@ -103,7 +156,7 @@ The director reads its words from the character's config, usually a `director.ya
 
 Its `extension.yaml` asks for the key `model.api_key_env` names, so the runtime checks whichever key the character's director uses.
 
-Other ideas the hooks fit: awarding points from how the character ended a turn (`after_turn`), sending turns to a monitoring or eval service (`after_llm`, non-blocking), or blocking a topic before the model sees it (`before_llm`).
+Other ideas the hooks and services fit: watching a group chat and offering a message to answer (a service, plus `before_llm` to put the chat in the prompt), awarding points from how the character ended a turn (`after_turn`), sending turns to a monitoring or eval service (`after_llm`, non-blocking), or blocking a topic before the model sees it (`before_llm`).
 
 ## Sharing extensions
 

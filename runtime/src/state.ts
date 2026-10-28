@@ -26,11 +26,22 @@ export interface Beat {
 	camera?: string;
 }
 
+// One stretch of speech the runtime heard, with when its words were spoken, in
+// Unix ms on the runtime's clock.
+export interface Utterance {
+	text: string;
+	start_ms: number;
+	end_ms: number;
+}
+
 export interface State {
 	schema: number;
 	character: Record<string, unknown>;
 	session: { id: string; channel: string; end_reason?: string };
-	input?: { text: string; channel: string };
+	// `offered_by`: the extension whose offer this turn is, when it is one.
+	// `utterances`: the speech the user's line was heard as, oldest first, when
+	// the runtime heard all of it
+	input?: { text: string; channel: string; offered_by?: string; utterances?: Utterance[] };
 	messages?: Message[];
 	prompt?: string;
 	reply?: string;

@@ -28,21 +28,28 @@
 //   after_turn        the next `llm` arrives, the socket closes, or the reply
 //                     and its sentences are done and nothing new came for a moment
 //   on_session_end    the socket closes
+//
+// Beside the hooks, every extension with a `service` runs it from just after
+// on_session_start until the session ends. A service may start a turn by
+// offering the player a line of input over the offers link (offers.ts).
 
 import { randomUUID } from "node:crypto";
 import WebSocket from "ws";
 import { printable } from "./check.ts";
 import { hasHook, runHook } from "./extensions.ts";
-import type { Loaded } from "./extensions.ts";
+import type { Loaded, ServiceContext } from "./extensions.ts";
 import { LlmHttpError, LlmStreamError, streamChat } from "./llm.ts";
 import { ELEVENLABS_KEY } from "./manifest.ts";
 import type { Character } from "./manifest.ts";
 import { STATE_SCHEMA } from "./state.ts";
 import type { Beat, Message, State, Timing } from "./state.ts";
 import { SttRelay } from "./stt.ts";
+import { Heard } from "./utterances.ts";
 import { Tts } from "./tts.ts";
 import { Alignment } from "./align.ts";
 import { Leveler } from "./level.ts";
+import { Offers } from "./offers.ts";
+import type { LinkHub } from "./offers.ts";
 import type { AlignmentChunk } from "./align.ts";
 
 const PROTOCOL_VERSION = 1;
@@ -62,6 +69,13 @@ const TURN_IDLE_MS = 1500;
 // these, a request is refused rather than spent.
 const MAX_LLM_IN_FLIGHT = 2;
 const MAX_TTS_IN_FLIGHT = 8;
+
+// A service that fails is started again after a wait that doubles from the
+// first to the last; one that ran this long before failing starts over at the first.
+const SERVICE_RETRY_MS = [1000, 30_000] as const;
+const SERVICE_HEALTHY_MS = 60_000;
+// how long the session waits for its services to stop before on_session_end
+const SERVICE_STOP_MS = 2000;
 
 interface Turn {
 	id: number;
@@ -151,7 +165,7 @@ export function applyExt(ext: State["ext"], c: ExtChanges): State["ext"] {
 	return out;
 }
 
-export function runSession(ws: WebSocket, character: Character, exts: Loaded[]): void {
+export function runSession(ws: WebSocket, character: Character, exts: Loaded[], hub?: LinkHub): void {
 	const sessionId = randomUUID();
 	// a log line can carry the character's and its providers' text
 	const log = (line: string) => console.log(printable(`[${sessionId.slice(0, 8)}] ${line}`));
@@ -191,8 +205,13 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 		if (turn && turn !== t) turn.state.ext = applyExt(turn.state.ext, changes);
 	};
 
+	const offers = new Offers(hub, log);
+	const services = new AbortController();
+	const running: Promise<void>[] = [];
+
 	const elevenKey = process.env[ELEVENLABS_KEY] ?? "";
-	const stt = new SttRelay(character.stt, elevenKey, send);
+	const heard = new Heard();
+	const stt = new SttRelay(character.stt, elevenKey, send, { onFinal: (f) => heard.add(f) });
 	const tts = new Tts(character.voice, elevenKey, (s) => log(`[tts] ${s}`));
 
 	const closeTurn = async (t: Turn) => {
@@ -219,6 +238,78 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 	log(`open: ${character.id}, chat ${character.chat.model}, voice ${character.voice.model} on ${tts.transport}`);
 	const started = runHook(exts, "on_session_start", baseState(), log).then((s) => { ext = s.ext; });
 
+	// A service's own `ext.<name>`, written whenever it likes: the session keeps
+	// it and the open turn gets it, so the next hook sees it.
+	const setOwnExt = (name: string, value: unknown) => {
+		const changes = { set: { [name]: structuredClone(value) }, removed: [] };
+		ext = applyExt(ext, changes);
+		if (turn && !turn.closed) turn.state.ext = applyExt(turn.state.ext, changes);
+	};
+	const startService = (e: Loaded) => {
+		// Each run gets its own signal and voice listeners, so a run that failed
+		// leaves nothing behind beside the one that replaces it.
+		const context = (run: AbortSignal, listening: Set<() => void>): ServiceContext => ({
+			config: e.config,
+			session: { id: session.id, channel: session.channel },
+			signal: run,
+			log: (line) => log(`[ext] ${e.name} service: ${line}`),
+			ext: {
+				// the open turn has what this extension's hooks wrote in it so far
+				get: () => structuredClone((turn && !turn.closed ? turn.state.ext : ext)[e.name]),
+				set: (value) => {
+					if (!closed && !run.aborted) setOwnExt(e.name, value);
+				},
+			},
+			offer: (req) => offers.offer(req, e.name),
+			voice: {
+				get state() {
+					return offers.voice;
+				},
+				get since() {
+					return offers.since;
+				},
+				on: (fn) => {
+					const off = offers.onVoice(fn);
+					listening.add(off);
+					return () => { off(); listening.delete(off); };
+				},
+			},
+		});
+		const loop = async () => {
+			let wait: number = SERVICE_RETRY_MS[0];
+			while (!services.signal.aborted) {
+				const began = Date.now();
+				const run = new AbortController();
+				const stop = () => run.abort();
+				services.signal.addEventListener("abort", stop, { once: true });
+				const listening = new Set<() => void>();
+				try {
+					await e.run!(context(run.signal, listening));
+					return; // a service that returns has nothing more to do
+				} catch (err) {
+					if (services.signal.aborted) return;
+					if (Date.now() - began > SERVICE_HEALTHY_MS) wait = SERVICE_RETRY_MS[0];
+					log(`[ext] ${e.name} service failed: ${err instanceof Error ? err.message : String(err)}; starting it again in ${wait / 1000}s`);
+				} finally {
+					run.abort();
+					services.signal.removeEventListener("abort", stop);
+					for (const off of listening) off();
+				}
+				await new Promise<void>((r) => {
+					const stop = () => { clearTimeout(timer); r(); };
+					const timer = setTimeout(() => { services.signal.removeEventListener("abort", stop); r(); }, wait);
+					services.signal.addEventListener("abort", stop, { once: true });
+				});
+				wait = Math.min(wait * 2, SERVICE_RETRY_MS[1]);
+			}
+		};
+		running.push(loop());
+	};
+	void started.then(() => {
+		if (closed) return;
+		for (const e of exts) if (e.run) startService(e);
+	});
+
 	const onLlm = async (id: number, history: unknown, source: unknown) => {
 		// registered at once, so a cancel or the in-flight limit sees it
 		const ac = new AbortController();
@@ -232,10 +323,16 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 		if (turn) void closeTurn(turn);
 		const messages = toMessages(history);
 		const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
-		const channel = source === "chat" || source === "screen" ? source : "voice";
+		// a turn the player took from an offer names the offer's source
+		const offered = offers.take(lastUser);
+		const channel = offered ? offered.source : source === "chat" || source === "screen" ? source : "voice";
+		const input: NonNullable<State["input"]> = { text: lastUser, channel };
+		if (offered) input.offered_by = offered.by;
+		const utterances = channel === "voice" ? heard.match(lastUser) : undefined;
+		if (utterances) input.utterances = utterances;
 		const t: Turn = {
 			id,
-			state: { ...baseState(), turn: id, input: { text: lastUser, channel }, messages, prompt: character.prompt },
+			state: { ...baseState(), turn: id, input, messages, prompt: character.prompt },
 			llmDone: false,
 			ttsInFlight: 0,
 			firstSentence: true,
@@ -262,15 +359,26 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 			? runHook(exts, "before_reply", t.state, log).then((s) => s.cancel === true)
 			: Promise.resolve(false);
 
-		t.state = await runHook(exts, "before_llm", t.state, log);
+		// a service may write its ext while before_llm runs on a copy
+		const beforeLlm = t.state.ext;
+		const prepared = await runHook(exts, "before_llm", t.state, log);
+		t.state = { ...prepared, ext: applyExt(t.state.ext, extChanges(beforeLlm, prepared.ext)) };
 		if (closed) return;
 		if (cancelledByApp.has(ac)) return finish("cut off by the app");
 		if (t.state.cancel === true) return silent();
 
 		// The reply streams as it is written, but nothing reaches the app until
-		// before_reply has decided.
+		// before_reply has decided, nor while it could still be the model's
+		// silent reply.
+		const token = character.chat.silent_reply ?? "";
+		let maybeSilent = token !== "";
+		let passed = false; // the model answered its silent reply
 		let decided = false;
 		const held: string[] = [];
+		const release = () => {
+			for (const text of held) send({ t: "llm_delta", id, text });
+			held.length = 0;
+		};
 		void replyCancelled.then((cancel) => {
 			decided = true;
 			if (cancel) {
@@ -279,25 +387,42 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 			}
 			// the app cut the turn off while it waited; what was held stays unsent
 			if (ac.signal.aborted) return;
-			for (const text of held) send({ t: "llm_delta", id, text });
-			held.length = 0;
+			if (!maybeSilent) release();
 		});
 
 		let reply = "";
 		let failure: string | null = null;
 		try {
 			const apiKey = process.env[character.chat.api_key_env] ?? "";
-			const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? [])];
+			// the app keeps a silent reply as `…`; the model wrote it as the token
+			const said = (m: Message): Message =>
+				token && m.role === "assistant" && m.content.trim() === SILENT_TURN ? { ...m, content: token } : m;
+			const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? []).map(said)];
 			for await (const text of streamChat(character.chat, apiKey, request, ac.signal)) {
 				// what arrived in the same chunk as a cancel is not sent
 				if (closed || ac.signal.aborted) break;
 				reply += text;
-				if (decided) send({ t: "llm_delta", id, text });
-				else held.push(text);
+				held.push(text);
+				if (maybeSilent) {
+					const lead = reply.trimStart();
+					if (lead.startsWith(token)) {
+						// whatever the model meant to add after it goes unwritten
+						passed = true;
+						ac.abort();
+						break;
+					}
+					if (!token.startsWith(lead)) maybeSilent = false;
+				}
+				if (decided && !maybeSilent) release();
 			}
 		} catch (e) {
 			if (!ac.signal.aborted)
 				failure = e instanceof LlmHttpError ? `llm_${e.status}` : e instanceof LlmStreamError ? "llm_failed" : "llm_network";
+		}
+		// a reply that ended while it still looked like the start of the token was not it
+		if (!passed) {
+			maybeSilent = false;
+			if (decided && !ac.signal.aborted && !closed) release();
 		}
 		// a reply with no text would leave the app waiting on the model
 		if (!failure && !reply.trim() && !ac.signal.aborted && !closed) failure = "llm_empty";
@@ -312,6 +437,12 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 			send({ t: "error", id, text: failure });
 			return finish(`failed: ${failure}`);
 		}
+		// the model chose silence: the turn ends like a cancelled one, but after_llm
+		// still sees the reply
+		if (passed) {
+			t.state.cancel = true;
+			send({ t: "llm_delta", id, text: SILENT_TURN });
+		}
 		send({ t: "llm_done", id });
 		// the reply is done; after_llm below no longer counts against the limit
 		if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -320,7 +451,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 		const after = await runHook(exts, "after_llm", t.state, log);
 		t.state = { ...after, ext: t.state.ext };
 		writeExt(t, extChanges(before, after.ext));
-		finish(`replied, ${reply.length} chars`);
+		finish(passed ? "silent reply, nothing spoken" : `replied, ${reply.length} chars`);
 	};
 
 	// A beat that only changes the face at the start goes out as `emotion`, so it
@@ -505,6 +636,14 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[]):
 		tts.close();
 		for (const ac of llmStreams.values()) ac.abort();
 		stt.close();
+		offers.close();
+		services.abort();
+		if (running.length) {
+			let timer: ReturnType<typeof setTimeout> | undefined;
+			const late = new Promise<void>((r) => { timer = setTimeout(r, SERVICE_STOP_MS); });
+			await Promise.race([Promise.allSettled(running), late]);
+			clearTimeout(timer);
+		}
 		if (turn) await closeTurn(turn);
 		await runHook(exts, "on_session_end", { ...baseState(), session: { ...session, end_reason: reason } }, log);
 		log(`closed: ${reason}`);
