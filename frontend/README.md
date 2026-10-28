@@ -1,10 +1,42 @@
 # Mutuals Character Studio
 
-A minimal local frontend for the character harness. The character is rendered in
-the page; this app does not spawn the native Kaigen player. Conversation uses the
+A minimal local frontend for the character harness. Browser mode renders the
+character with Three.js; desktop mode automatically starts the native Kaigen
+renderer. Conversation uses the
 existing runtime and its public session and extension contracts.
 
 ## Run
+
+See [Desktop Studio setup](../docs/desktop-studio.md) for complete Windows and
+macOS installation, daily startup, architecture and troubleshooting instructions.
+
+For native rendering on **Windows or macOS**, restore the licensed Kaigen SDK at
+`player/hz`, install root and frontend dependencies, then run from the repo root:
+
+```sh
+npm run desktop
+```
+
+This builds Studio and the player for the current platform, then opens Electron.
+No window picker or screen capture is involved. The background player renders to
+an offscreen target, and a small application shader uses scene depth to mask the
+background. Studio composites the RGBA frames over its existing background presets,
+including Clouds. This preserves opaque character geometry and native shaders;
+depth masking does not reproduce full partial transparency or bloom beyond the
+silhouette. The engine itself is unchanged.
+
+A token-protected WebSocket on `127.0.0.1` carries binary RGBA frames (an 8-byte
+little-endian width/height header, then pixels), and JSON animation/mouth/size
+commands in the opposite direction. Frames are capped at 1280 pixels per side
+and 30 fps; each frame requires an acknowledgement before the next readback, so
+slow consumers cannot build an unbounded queue. The player receives no provider
+keys and does not open a second microphone or voice session. Electron owns its
+player and local server processes and stops them when closed.
+
+Windows uses Direct3D and macOS uses Metal through the same Kaigen APIs. The macOS
+build and native window hiding path require verification on an actual Mac. This
+is a development launcher; signed installers and bundled SDK-free distribution
+are separate packaging work.
 
 Use Node 24 or later. Install the harness dependencies from the repository root
 first, then:
@@ -114,11 +146,14 @@ before saving. Extension changes persist in the character manifest. Enabled entr
 
 ## Current limits
 
-- This is a **browser renderer**, not Kaigen compiled into a web view. It uses
+- **Browser mode** uses Three.js, not Kaigen compiled into a web view. It uses
   the same model and animation data. Kaigen's custom shading, cloth and certain
   expression effects are not reproduced exactly. Standard VRM spring bones are
   handled by the VRM loader when present. Profile joints hidden by the native
   rig are also hidden in the browser.
+- Desktop mode uses the actual native Kaigen renderer. Its application-level
+  depth mask has the partial-transparency/bloom limits described above; macOS
+  runtime verification remains pending.
 - Profile models must have a matching GLB source in `player/assets/`. Model
   characters use the harness's prepared animation model. Missing assets show an
   error instead of an image placeholder.

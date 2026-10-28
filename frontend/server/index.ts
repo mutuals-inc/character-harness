@@ -220,6 +220,11 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
     if (!portrait) return json(res, { error: "Not found." }, 404);
     return file(res, portrait);
   }
+  if (url.pathname === "/api/native-stage" && req.method === "GET") {
+    const c = characterById(url.searchParams.get("character") ?? "");
+    const { prepareModel } = await import("../../runtime/src/rig/prepare.ts");
+    return json(res, {character: c.rig.kind === "profile" ? c.rig.profile : path.relative(path.join(ROOT,"player"),prepareModel(c.id, c.rig).file).split(path.sep).join("/")});
+  }
   if (url.pathname === "/api/model" && req.method === "GET") {
     const c = characterById(url.searchParams.get("character") ?? "");
     if (c.rig.kind === "model") {

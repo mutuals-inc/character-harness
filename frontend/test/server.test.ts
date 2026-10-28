@@ -80,6 +80,7 @@ test(
       );
     }
     assert.equal((await get("/api/bootstrap")).status, 401);
+    assert.equal((await get("/api/native-stage?character=foxglove")).status, 401);
     assert.equal(
       (await get("/", "GET", { Host: `untrusted.test:${port}` })).status,
       403,
@@ -92,6 +93,10 @@ test(
     assert.equal(opened.status, 200);
     assert.match(opened.cookie!, /HttpOnly; SameSite=Strict/);
     const cookie = opened.cookie!.split(";")[0];
+    const native = await get('/api/native-stage?character=foxglove','GET',{Cookie:cookie});
+    assert.equal(native.status,200);
+    assert.deepEqual(JSON.parse(native.body),{character:characterById('foxglove').rig.kind==='profile' ? (characterById('foxglove').rig as {profile:string}).profile : ''});
+    assert.equal((await get('/api/native-stage?character=missing-character','GET',{Cookie:cookie})).status,400);
     assert.equal(
       (
         await get(

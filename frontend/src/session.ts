@@ -2,11 +2,14 @@ import { state, record, status } from "./store.ts";
 import { request, toast } from "./lib/dom.ts";
 import { AudioOutput } from "./audio/output.ts";
 import { Microphone } from "./audio/input.ts";
+import { Captions } from './audio/captions.ts';
 import type { WireMessage } from "./types.ts";
 import { withStudioCue, withStudioHook } from "./lib/studio-live.ts";
 
 export const output = new AudioOutput();
 export const microphone = new Microphone();
+const captions = new Captions();
+export function currentCaption(){return captions.text(id=>output.position(id));}
 let socket: WebSocket | null = null;
 let sequence = 0;
 let replyId: number | null = null;
@@ -170,6 +173,8 @@ function handleMessage(event: MessageEvent) {
     );
     resolveStart?.();
     resetStartup();
+  } else if (message.t === 'tts_alignment' && message.id!==undefined && message.alignment) {
+    captions.push(message.id,message.alignment);
   } else if (message.t === "studio_hook") {
     hookEvent(message);
   } else if (message.t === "llm_delta" && message.id === replyId) {
@@ -286,6 +291,7 @@ export function cancelReply(notify = true) {
 }
 
 export function stopCharacterSpeech(notify = true) {
+  captions.clear();
   if (notify && speechId !== null) send({ t: "cancel", id: speechId });
   speechId = null;
   sentences.length = 0;

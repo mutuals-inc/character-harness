@@ -3,7 +3,7 @@
   "environment": "Windows; physical 1920x1080 Chrome display at 100% zoom; in-app Chromium viewport tests",
   "automated": {
     "frontend": {
-      "passed": 24,
+      "passed": 28,
       "failed": 0
     },
     "runtime": {
@@ -61,5 +61,15 @@
     "Native-player extension services can be installed/configured, but autonomous service offers require the native player offers link; browser sessions run lifecycle hooks.",
     "No claim that every external provider/model or third-party extension combination has been exercised."
   ],
-  "cleanup": "Temporary browser characters were deleted through the UI. Temporary pagination fixtures and uploaded QA extension packages were moved under .cache/frontend/test-artifacts. Existing characters and API keys were preserved."
+  "cleanup": "Temporary browser characters were deleted through the UI. Temporary pagination fixtures and uploaded QA extension packages were moved under .cache/frontend/test-artifacts. Existing characters and API keys were preserved.",
+  "desktopVerified": {
+    "platform": "Windows",
+    "nativeBuild": "passed",
+    "renderer": "Kaigen D3D12 via offscreen sRGB targets; scene-depth mask and original Clouds background",
+    "transport": "token-protected loopback WebSocket with acknowledged RGBA frames",
+    "importedCharacter": "foxglove-studio: 12 frames, 85532 visible character pixels; temporary renderer cleaned up",
+    "liveConversation": "Observed actual chat, speech, listening, extension events and audio-clock captions in Electron; user also exercised live conversation",
+    "macOS": "Launcher/build resolver and native window hiding implemented; actual Mac build/runtime verification pending",
+    "wasm": "SDK has WebGPU backend; build blocked by missing lib/wasm/release/hz_engine.a; matching internal SDK component could not be downloaded"
+  }
 }

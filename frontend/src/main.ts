@@ -4,6 +4,7 @@ import { icon } from "./lib/icons.ts";
 import { state, record, saveSettings } from "./store.ts";
 import {
   cancelReply,
+  currentCaption,
   endSession,
   microphone,
   output,
@@ -12,7 +13,8 @@ import {
   stopCharacterSpeech,
   toggleMicrophone,
 } from "./session.ts";
-import { CharacterStage } from "./stage/stage.ts";
+import type { CharacterStage } from "./stage/stage.ts";
+import { NativeStage } from "./stage/native.ts";
 import { shell } from "./ui/shell.ts";
 import { renderTranscript, studio, renderStudioLive } from "./ui/studio.ts";
 import {
@@ -54,7 +56,7 @@ import type { Bootstrap, CharacterInfo } from "./types.ts";
 
 installExtensionOrdering();
 
-let stage: CharacterStage | null = null;
+let stage: CharacterStage | NativeStage | null = null;
 let pendingDeletion: CharacterInfo | null = null;
 let lastAudibleVolume = state.settings.volume || 0.8;
 async function boot(
@@ -88,11 +90,12 @@ async function boot(
   if (creationDraft) $("#view-character-new").replaceChildren(creationDraft);
   renderTranscript();
   try {
-    stage = new CharacterStage($("#stage-canvas"));
+    if (window.nativeStudio) stage = new NativeStage($("#stage-canvas"));
+    else { const { CharacterStage } = await import("./stage/stage.ts"); stage = new CharacterStage($("#stage-canvas")); }
     void stage.load(data.character);
   } catch {
     $("#stage-loading").textContent =
-      "WebGL is unavailable. Enable hardware acceleration to use the 3D stage.";
+      window.nativeStudio ? "The native preview could not initialize." : "WebGL is unavailable. Enable hardware acceleration to use the 3D stage.";
   }
   setView(view);
   renderSessionState();
@@ -912,16 +915,8 @@ document.addEventListener("change", (event) => {
   })().catch((error) => toast(error.message, true));
 });
 
-document.addEventListener("transcript", () => {
-  renderTranscript();
-  const last = state.messages
-    .filter((m) => m.role === "assistant")
-    .at(-1)
-    ?.content.replace(/\[[^\]]+\]/g, "")
-    .trim();
-  if (state.settings.captions && last)
-    $("#stage-caption").textContent = last.slice(-180);
-});
+document.addEventListener("transcript", renderTranscript);
+
 document.addEventListener("session-state", () => {
   if (state.bootstrap) renderSessionState();
 });
@@ -951,8 +946,11 @@ function updateMeters() {
     });
   renderStudioPresence();
   const caption = document.getElementById("stage-caption");
-  if (caption)
+  if (caption) {
+    const text=state.settings.captions ? currentCaption() : '';
+    if(caption.textContent!==text)caption.textContent=text;
     caption.style.visibility = state.settings.captions ? "visible" : "hidden";
+  }
 }
 
 void boot()

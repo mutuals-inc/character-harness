@@ -67,6 +67,11 @@ export class AudioOutput {
       : null;
   }
 
+  position(id:number):number|null {
+    const start=this.starts.get(id);
+    return this.context && start!==undefined ? this.context.currentTime-start : null;
+  }
+
   level(): number {
     if (!this.analyser) return 0;
     this.analyser.getByteTimeDomainData(this.data);

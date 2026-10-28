@@ -526,7 +526,7 @@ hz_internal i32 player_vrm_body(PlayerVrmBody *b, PJson *table, CString *out_ges
 hz_internal String player_vrm_stem(String path) {
   u32 start = 0, end = path.len;
   for (u32 i = 0; i < path.len; i++) {
-    if (path.value[i] == '/')
+    if (path.value[i] == '/' || path.value[i] == '\\')
       start = i + 1;
     if (path.value[i] == '.')
       end = i;

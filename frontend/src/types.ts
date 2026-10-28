@@ -102,6 +102,7 @@ export interface Settings {
   paused: boolean;
 }
 export interface WireMessage {
+  alignment?: {characters?:string[];character_start_times_seconds?:number[];character_end_times_seconds?:number[]};
   seq?: number;
   t: string;
   id?: number;

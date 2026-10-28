@@ -17,7 +17,9 @@
     "start": "node runtime/src/main.ts",
     "check": "node runtime/src/main.ts --check",
     "test": "node --test \"runtime/test/*.test.ts\"",
-    "typecheck": "tsc -p runtime"
+    "typecheck": "tsc -p runtime",
+    "desktop": "npm --prefix frontend run desktop",
+    "desktop:prepare": "npm --prefix frontend run desktop:prepare"
   },
   "dependencies": {
     "ws": "^8.22.0",

@@ -1749,9 +1749,17 @@ dialog #toast:not(.visible) {
   height: clamp(300px, 45vh, 540px);
 }
 .studio-grid > .conversation {
-  height: auto;
+  height: clamp(400px, calc(100dvh - 164px), 900px);
   min-height: 400px;
-  align-self: stretch;
+  overflow: hidden;
+  align-self: start;
+}
+.conversation-header, .chat-composer, .conversation-controls, .studio-listening {
+  flex-shrink: 0;
+}
+#transcript {
+  overscroll-behavior: contain;
+  scrollbar-gutter: stable;
 }
 .studio-live.surface {
   margin: 0;
@@ -2098,3 +2106,15 @@ dialog #toast:not(.visible) {
 }
 
 .studio-stage-column .stage.expanded { height: auto; }
+
+.native-stage #stage-loading { z-index:3; }
+
+
+
+.stage-caption {
+  max-width: min(520px, calc(100% - 40px));
+  font-size: clamp(1rem, 1.2vw, 1.25rem);
+  line-height: 1.45;
+  text-align: center;
+  overflow-wrap: anywhere;
+}

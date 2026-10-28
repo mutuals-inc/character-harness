@@ -51,12 +51,17 @@ The `memory` and `reactions` extensions, if a character uses them, need `TYPESAF
 
 `npm test` runs the tests; they need no keys or network.
 
-## Local web studio (draft)
+## Character Studio
 
 The optional [frontend](frontend/README.md) puts the animated character, text and
 voice conversation, microphone settings, character editing, extensions and hook
-activity in one browser interface. It uses a browser renderer and the existing
-runtime; it does not open the native player.
+feedback in one interface. Desktop mode automatically runs Kaigen inside the
+Studio preview, with the native shaders and cloth. Browser mode uses Three.js.
+
+For the native desktop interface on Windows or macOS, install root and frontend
+dependencies and restore the licensed Kaigen SDK, then run **`npm run desktop`**.
+See [Desktop Studio setup](docs/desktop-studio.md) for separate Windows and macOS
+instructions, SDK requirements, troubleshooting and implementation details.
 
 Install its dependencies with `npm --prefix frontend install`, then run
 `npm run frontend` and open `http://127.0.0.1:4173`. Local animation previews and
@@ -67,6 +72,7 @@ and the draft's current limits.
 ## Docs
 
 - `docs/architecture.md`: the turn loop and the event system
+- `docs/desktop-studio.md`: start native-rendered Studio on Windows and macOS
 - `docs/character-manifest.md`: what a character is
 - `docs/extensions.md`: how to write an extension
 - `docs/your-first-extension.md`: build, check and test a small extension step by step

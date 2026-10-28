@@ -8,7 +8,9 @@
     "dev": "node server/index.ts",
     "build": "tsc --noEmit && vite build",
     "start": "node server/index.ts --production",
-    "test": "node --test --test-concurrency=1 test/*.test.ts"
+    "test": "node --test --test-concurrency=1 test/*.test.ts",
+    "desktop": "node desktop/prepare.mjs && electron desktop/main.cjs",
+    "desktop:prepare": "node desktop/prepare.mjs"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",
@@ -24,6 +26,7 @@
     "@types/node": "^24.19.1",
     "@types/three": "^0.180.0",
     "@types/ws": "^8.18.2",
+    "electron": "^45.1.0",
     "typescript": "^5.9.3"
   }
 }
