@@ -11,6 +11,7 @@ input (voice, chat, screen, or an offer from a service)
   ├→ before_reply   reply at all?
   └→ before_llm     build the prompt; inject context
      → llm          the character's model writes the reply
+       ↻ on_tool_call  a tool it called runs; a result asks the model again
      → after_llm    the full reply is written
   → on_sentence     per sentence, once before_reply is done, while TTS synthesizes it
   → on_speak        the sentence's audio and timing are ready
