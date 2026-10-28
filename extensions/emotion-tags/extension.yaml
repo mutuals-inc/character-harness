@@ -1,3 +1,4 @@
+description: Reads emotion tags in replies and turns them into character expressions.
 name: emotion-tags
 handler: index.ts
 hooks:

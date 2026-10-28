@@ -1,0 +1,14 @@
+model:
+  base_url: https://api.x.ai/v1
+  api_key_env: XAI_API_KEY
+  model: grok-4-1-fast-non-reasoning
+prompt: Stage the character's speech naturally using the available expressions and gestures.
+emotions:
+  neutral: calm and attentive
+  happy: pleased
+  sad: disappointed
+  surprised: taken aback
+registers: [regular]
+gestures: []
+cameras: [hold, push-in, close-up, pull-back]
+limits: {cameras: 1, intense: 1}

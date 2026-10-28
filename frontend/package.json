@@ -1,5 +1,6 @@
 {
   "name": "mutuals-harness-frontend",
+  "version": "0.1.0",
   "private": true,
   "type": "module",
   "scripts": {
@@ -11,6 +12,9 @@
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",
+    "dompurify": "^3.4.17",
+    "fflate": "^0.8.3",
+    "marked": "^18.1.2",
     "three": "^0.180.0",
     "vite": "^7.1.7",
     "ws": "^8.22.0",

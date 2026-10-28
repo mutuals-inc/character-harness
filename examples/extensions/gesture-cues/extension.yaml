@@ -1,3 +1,4 @@
+description: Example behavior that turns reply cues into gestures.
 name: gesture-cues
 handler: index.ts
 hooks:

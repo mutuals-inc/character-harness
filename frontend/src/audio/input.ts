@@ -11,12 +11,16 @@ export class Microphone {
   private generation = 0;
   level = 0;
   running = false;
+  get hearingSpeech() {
+    return this.running && this.speaking;
+  }
 
   async start(
     settings: Settings,
     send: (data: object | ArrayBuffer) => void,
     voiceStarted: () => void,
     suppliedStream?: MediaStream,
+    voiceEnded: () => void = () => {},
   ) {
     await this.stop();
     const generation = this.generation;
@@ -78,6 +82,7 @@ export class Microphone {
             send({ t: "stt_eos", utterance: this.utterance });
             this.speaking = false;
             this.silence = 0;
+            voiceEnded();
           }
         } else {
           this.preRoll.push(pcm);

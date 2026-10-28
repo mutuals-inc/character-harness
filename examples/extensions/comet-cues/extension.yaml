@@ -1,3 +1,4 @@
+description: Example integration that sends performance cues to Comet.
 name: comet-cues
 handler: index.ts
 hooks:

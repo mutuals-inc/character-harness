@@ -5,6 +5,16 @@ import { once } from "node:events";
 import { request } from "node:http";
 import path from "node:path";
 import WebSocket from "ws";
+import { characterById, ROOT } from "../server/catalog.ts";
+import {
+  mkdtempSync,
+  readFileSync,
+  writeFileSync,
+  renameSync,
+  mkdirSync,
+  existsSync,
+} from "node:fs";
+import { parseDocument } from "yaml";
 
 test(
   "the production host protects metadata and rejects cross-origin sessions and writes",
@@ -74,14 +84,45 @@ test(
       (await get("/", "GET", { Host: `untrusted.test:${port}` })).status,
       403,
     );
+    assert.equal(
+      (await get("/api/extensions/import", "POST", {}, "{}")).status,
+      401,
+    );
     const opened = await get("/");
     assert.equal(opened.status, 200);
     assert.match(opened.cookie!, /HttpOnly; SameSite=Strict/);
     const cookie = opened.cookie!.split(";")[0];
+    assert.equal(
+      (
+        await get(
+          "/api/extensions/import",
+          "POST",
+          { Cookie: cookie, Origin: "https://untrusted.test" },
+          "{}",
+        )
+      ).status,
+      403,
+    );
     const metadata = await get("/api/bootstrap", "GET", { Cookie: cookie });
     assert.equal(metadata.status, 200);
     const body = JSON.parse(metadata.body);
     assert.equal(body.hooks.length, 8);
+    assert.ok(body.chatPresets.length > 0);
+    const foxglove = characterById("foxglove");
+    assert.equal(body.voicePresets[0].name, foxglove.name);
+    assert.equal(body.voicePresets[0].voiceId, foxglove.voice.voice_id);
+    assert.equal(
+      new Set(
+        body.voicePresets.map((preset: { voiceId: string }) => preset.voiceId),
+      ).size,
+      body.voicePresets.length,
+    );
+    assert.ok(
+      body.chatPresets.every(
+        (preset: object) =>
+          Object.keys(preset).sort().join(",") === "api,baseUrl,keyName,model",
+      ),
+    );
     assert.ok(
       body.character.keys.every(
         (key: object) => Object.keys(key).sort().join(",") === "name,ready",
@@ -97,6 +138,122 @@ test(
         )
       ).status,
       403,
+    );
+    assert.equal(
+      (await get("/api/provider-keys", "POST", {}, "{}")).status,
+      401,
+    );
+    assert.equal(
+      (
+        await get(
+          "/api/provider-keys",
+          "POST",
+          { Cookie: cookie, Origin: "https://untrusted.test" },
+          "{}",
+        )
+      ).status,
+      403,
+    );
+    const fixture = mkdtempSync(
+      path.join(ROOT, "characters", "provider-key-test-"),
+    );
+    context.after(() => {
+      assert.equal(path.dirname(fixture), path.join(ROOT, "characters"));
+      assert.ok(path.basename(fixture).startsWith("provider-key-test-"));
+      const archive = path.join(ROOT, ".cache/frontend/test-artifacts");
+      mkdirSync(archive, { recursive: true });
+      if (existsSync(fixture))
+        renameSync(
+          fixture,
+          path.join(archive, `${path.basename(fixture)}-${Date.now()}`),
+        );
+    });
+    const manifest = parseDocument(
+      readFileSync(path.join(foxglove.dir, "character.yaml"), "utf8"),
+    );
+    const id = path.basename(fixture).toLowerCase();
+    manifest.set("id", id);
+    manifest.set("env_file", ".env");
+    manifest.set("prompt", "system.md");
+    manifest.set("extensions", []);
+    manifest.set("disabled_extensions", []);
+    writeFileSync(path.join(fixture, "character.yaml"), String(manifest));
+    writeFileSync(
+      path.join(fixture, "system.md"),
+      "A local credential test fixture.",
+    );
+    writeFileSync(
+      path.join(fixture, ".env"),
+      'ELEVENLABS_API_KEY="dummy-original-speech"\n',
+    );
+    const savedKeys = await get(
+      "/api/provider-keys",
+      "POST",
+      {
+        Cookie: cookie,
+        Origin: `http://${host}`,
+        "Content-Type": "application/json",
+      },
+      JSON.stringify({
+        id,
+        keys: {
+          [foxglove.chat.api_key_env]: "dummy-new-chat",
+          ELEVENLABS_API_KEY: "",
+        },
+      }),
+    );
+    assert.equal(savedKeys.status, 200, savedKeys.body);
+    assert.ok(!savedKeys.body.includes("dummy-new-chat"));
+    assert.ok(!savedKeys.body.includes("dummy-original-speech"));
+    const status = JSON.parse(savedKeys.body).keys;
+    assert.ok(status.every((key: { ready: boolean }) => key.ready));
+    assert.ok(
+      status.every(
+        (key: object) => Object.keys(key).sort().join(",") === "name,ready",
+      ),
+    );
+    assert.equal(
+      (await get("/api/character-delete", "POST", {}, "{}")).status,
+      401,
+    );
+    assert.equal(
+      (
+        await get(
+          "/api/character-delete",
+          "POST",
+          { Cookie: cookie, Origin: "https://untrusted.test" },
+          "{}",
+        )
+      ).status,
+      403,
+    );
+    const headers = {
+      Cookie: cookie,
+      Origin: `http://${host}`,
+      "Content-Type": "application/json",
+    };
+    const protectedDelete = await get(
+      "/api/character-delete",
+      "POST",
+      headers,
+      JSON.stringify({ id: foxglove.id, revision: body.character.revision }),
+    );
+    assert.equal(protectedDelete.status, 400);
+    assert.match(protectedDelete.body, /built-in/);
+    const deleted = await get(
+      "/api/character-delete",
+      "POST",
+      headers,
+      JSON.stringify({ id, revision: JSON.parse(savedKeys.body).revision }),
+    );
+    assert.equal(deleted.status, 200, deleted.body);
+    const afterDelete = JSON.parse(
+      (await get("/api/bootstrap", "GET", { Cookie: cookie })).body,
+    );
+    assert.ok(
+      !afterDelete.characters.some(
+        (character: { id: string }) => character.id === id,
+      ),
     );
     const refused = new WebSocket(
       `ws://${host}/studio-session?character=${body.character.id}`,

@@ -18,10 +18,21 @@ import {
   environment,
   listCharacters,
   modelFile,
+  portraitFile,
   ROOT,
   saveCharacter,
 } from "./catalog.ts";
 import {
+  createCharacter,
+  updateAssets,
+  updateExtensions,
+  deleteCharacter,
+} from "./character-files.ts";
+import { importExtension } from "./extension-import.ts";
+import { availableExtensions } from "./extensions.ts";
+import { saveProviderKeys, ProviderKeyError } from "./provider-keys.ts";
+import {
+  readFormData,
   authenticated,
   readJson,
   sameOrigin,
@@ -57,6 +68,9 @@ function file(res: ServerResponse, filename: string) {
     ".css": "text/css",
     ".svg": "image/svg+xml",
     ".webp": "image/webp",
+    ".png": "image/png",
+    ".jpg": "image/jpeg",
+    ".jpeg": "image/jpeg",
     ".ttf": "font/ttf",
     ".glb": "model/gltf-binary",
     ".vrm": "model/gltf-binary",
@@ -84,10 +98,127 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       url.searchParams.get("character") ?? characters[0]?.id ?? "",
     );
     return json(res, {
-      characters: characters.map(({ id, name }) => ({ id, name })),
+      characters: characters.map(
+        ({ directory, chatPreset, voicePreset, ...entry }) => entry,
+      ),
+      chatPresets: [
+        ...new Map(
+          characters.map(({ chatPreset }) => [
+            JSON.stringify(chatPreset),
+            chatPreset,
+          ]),
+        ).values(),
+      ],
+      voicePresets: [...characters]
+        .sort(
+          (a, b) => Number(b.id === "foxglove") - Number(a.id === "foxglove"),
+        )
+        .map(({ voicePreset }) => voicePreset)
+        .filter(
+          (preset, index, all) =>
+            all.findIndex((other) => other.voiceId === preset.voiceId) ===
+            index,
+        ),
+      availableExtensions: availableExtensions(),
       character: await describeCharacter(c),
       hooks: HOOKS,
     });
+  }
+  if (url.pathname === "/api/extensions/import" && req.method === "POST") {
+    if (active)
+      return json(
+        res,
+        { error: "End the session before installing extensions." },
+        409,
+      );
+    const data = await readFormData(req);
+    const file = data.get("package");
+    if (!(file instanceof File) || data.get("trusted") !== "on")
+      return json(
+        res,
+        { error: "Choose a trusted extension ZIP package." },
+        400,
+      );
+    try {
+      const id = importExtension(new Uint8Array(await file.arrayBuffer()));
+      return json(res, { id, availableExtensions: availableExtensions() }, 201);
+    } catch (error) {
+      return json(
+        res,
+        {
+          error:
+            error instanceof Error
+              ? error.message
+              : "Invalid extension package.",
+        },
+        400,
+      );
+    }
+  }
+  if (url.pathname === "/api/characters" && req.method === "POST") {
+    return json(res, await createCharacter(await readFormData(req)), 201);
+  }
+  if (url.pathname === "/api/provider-keys" && req.method === "POST") {
+    const data = await readJson(req);
+    if (active)
+      return json(
+        res,
+        { error: "End the session before changing provider keys." },
+        409,
+      );
+    const c = characterById(String(data.id));
+    saveProviderKeys(c.env_file, requiredKeys(c), data.keys);
+    return json(res, await describeCharacter(c));
+  }
+  if (url.pathname === "/api/character-delete" && req.method === "POST") {
+    const data = await readJson(req);
+    if (active)
+      return json(
+        res,
+        { error: "End the session before deleting a character." },
+        409,
+      );
+    const c = characterById(String(data.id));
+    deleteCharacter(c, String(data.revision));
+    return json(res, { id: c.id });
+  }
+  if (url.pathname === "/api/character" && req.method === "GET") {
+    return json(
+      res,
+      await describeCharacter(
+        characterById(url.searchParams.get("character") ?? ""),
+      ),
+    );
+  }
+  if (
+    (url.pathname === "/api/character-assets" ||
+      url.pathname === "/api/character-extensions") &&
+    req.method === "POST"
+  ) {
+    if (active)
+      return json(
+        res,
+        { error: "End the session before saving character settings." },
+        409,
+      );
+    let id: string;
+    if (url.pathname === "/api/character-assets") {
+      const form = await readFormData(req);
+      id = String(form.get("character"));
+      await updateAssets(characterById(id), form);
+    } else {
+      const data = await readJson(req);
+      id = String(data.id);
+      await updateExtensions(characterById(id), data);
+    }
+    return json(res, await describeCharacter(characterById(id)));
+  }
+  if (url.pathname === "/api/portrait" && req.method === "GET") {
+    const portrait = portraitFile(
+      characterById(url.searchParams.get("character") ?? ""),
+    );
+    if (!portrait) return json(res, { error: "Not found." }, 404);
+    return file(res, portrait);
   }
   if (url.pathname === "/api/model" && req.method === "GET") {
     const c = characterById(url.searchParams.get("character") ?? "");
@@ -143,6 +274,7 @@ const server = createServer(async (req, res) => {
     // Provider and extension exceptions may include credentials. Keep only known local errors public.
     const message = error instanceof Error ? error.message : "";
     const safe =
+      error instanceof ProviderKeyError ||
       /^(Invalid |Character not found|The character changed|End the session|A setting|The request|Expected a JSON|This profile)/.test(
         message,
       );
@@ -199,10 +331,6 @@ server.on("upgrade", (req, socket, head) => {
     });
     try {
       const c = characterById(url.searchParams.get("character") ?? "");
-      const disabled = new Set(
-        (url.searchParams.get("disabled") ?? "").split(","),
-      );
-      c.extensions = c.extensions.filter((e) => !disabled.has(e.name));
       const env = environment(c);
       const missing = requiredKeys(c).filter((key) => !env[key]);
       if (missing.length)

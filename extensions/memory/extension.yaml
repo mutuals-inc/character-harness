@@ -1,3 +1,4 @@
+description: Recalls and stores memories between conversations.
 name: memory
 handler: index.ts
 hooks:

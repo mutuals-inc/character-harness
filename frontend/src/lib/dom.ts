@@ -16,6 +16,7 @@ export const escape = (value: unknown) =>
   );
 export function toast(message: string, error = false) {
   const el = $("#toast");
+  (document.querySelector("dialog[open]") ?? document.body).append(el);
   el.textContent = message;
   el.className = error ? "visible error" : "visible";
   clearTimeout(timer);

@@ -1,0 +1,2 @@
+model:
+  api_key_env: TYPESAFE_API_KEY

@@ -6,6 +6,8 @@ import {
   mkdirSync,
   writeFileSync,
   renameSync,
+  realpathSync,
+  statSync,
 } from "node:fs";
 import path from "node:path";
 import { parseEnv } from "node:util";
@@ -19,7 +21,9 @@ import { checkCharacter, bodyOf } from "../../runtime/src/check.ts";
 import { loadExtensions } from "../../runtime/src/extensions.ts";
 import type { CharacterInfo } from "../src/types.ts";
 
-export const ROOT = path.resolve(import.meta.dirname, "../..");
+import { ROOT } from "./paths.ts";
+import { extensionAssignments, extensionInfo } from "./extensions.ts";
+export { ROOT };
 const ASSETS = path.join(ROOT, "player/assets");
 const CHARACTERS = path.join(ROOT, "characters");
 const initialEnvironment = { ...process.env };
@@ -29,12 +33,54 @@ export function listCharacters() {
     .filter(
       (x) =>
         x.isDirectory() &&
+        !x.name.startsWith(".") &&
         existsSync(path.join(CHARACTERS, x.name, "character.yaml")),
     )
     .map((x) => {
       const c = loadCharacter(path.join(CHARACTERS, x.name));
-      return { id: c.id, name: c.name, directory: x.name };
+      return {
+        id: c.id,
+        name: c.name,
+        directory: x.name,
+        protected: isProtectedCharacter(c),
+        voicePreset: { name: c.name, voiceId: c.voice.voice_id },
+        chatPreset: {
+          api: c.chat.api,
+          model: c.chat.model,
+          baseUrl: c.chat.base_url,
+          keyName: c.chat.api_key_env,
+        },
+        createdAt: Number.isFinite(Date.parse(String(c.manifest.created_at)))
+          ? Date.parse(String(c.manifest.created_at))
+          : statSync(c.dir).birthtimeMs,
+        modifiedAt: statSync(path.join(c.dir, "character.yaml")).mtimeMs,
+        portrait: portraitFile(c)
+          ? `/api/portrait?character=${encodeURIComponent(c.id)}`
+          : null,
+      };
     });
+}
+
+export function isProtectedCharacter(c: Character) {
+  return c.id === "foxglove" || path.basename(c.dir) === "foxglove";
+}
+
+// Portraits are local image assets; never expose arbitrary manifest paths.
+export function portraitFile(c: Character): string | null {
+  const declared = c.manifest.portrait;
+  const candidates =
+    typeof declared === "string"
+      ? [declared]
+      : ["portrait.webp", "portrait.png", "portrait.jpg", "portrait.jpeg"];
+  for (const candidate of candidates) {
+    const file = path.resolve(c.dir, candidate);
+    if (!/\.(webp|png|jpe?g)$/i.test(file) || !existsSync(file)) continue;
+    const resolved = realpathSync(file);
+    const relative = path.relative(realpathSync(ROOT), resolved);
+    if (relative.startsWith("..") || path.isAbsolute(relative)) continue;
+    return resolved;
+  }
+  return null;
 }
 
 export function characterById(id: string): Character {
@@ -135,6 +181,14 @@ export async function describeCharacter(c: Character): Promise<CharacterInfo> {
     name: c.name,
     description: String(c.manifest.description),
     author: String(c.manifest.author),
+    license: String(c.manifest.license),
+    purpose: String(c.manifest.purpose ?? ""),
+    chatKeyName: c.chat.api_key_env,
+    maxTokens: c.chat.params.max_tokens ?? null,
+    reasoningEffort: c.chat.params.reasoning_effort ?? "",
+    dropTags: c.voice.drop_tags,
+    springs: c.rig.kind === "model" ? c.rig.springs : true,
+    rigKind: c.rig.kind,
     revision: revision(c),
     prompt: c.prompt,
     model: c.chat.model,
@@ -153,12 +207,8 @@ export async function describeCharacter(c: Character): Promise<CharacterInfo> {
       language: c.stt.language ?? "",
       keyterms: c.stt.keyterms,
     },
-    extensions: c.extensions.map((e) => ({
-      name: e.name,
-      handler: e.handler,
-      hooks: Object.fromEntries(e.hooks),
-      keys: e.requires_env,
-    })),
+    extensions: extensionInfo(c),
+    extensionSettings: extensionAssignments(c),
     keys: requiredKeys(c).map((name) => ({ name, ready: Boolean(env[name]) })),
     body: {
       emotions: body.emotions ?? [],
@@ -204,6 +254,8 @@ export async function saveCharacter(
   const fields: [string, string[]][] = [
     ["name", ["name"]],
     ["description", ["description"]],
+    ["author", ["author"]],
+    ["license", ["license"]],
     ["model", ["models", "chat", "model"]],
     ["voiceId", ["voice", "voice_id"]],
     ["voiceModel", ["voice", "model"]],
@@ -216,6 +268,60 @@ export async function saveCharacter(
         at,
         textField(edits[key], key, key === "description" ? 2000 : 200),
       );
+  if (edits.purpose !== undefined) {
+    if (edits.purpose === "") doc.delete("purpose");
+    else doc.set("purpose", textField(edits.purpose, "purpose", 2000));
+  }
+  if (edits.chatApi !== undefined) {
+    if (!["chat_completions", "responses"].includes(String(edits.chatApi)))
+      throw new Error("Invalid chat API.");
+    doc.setIn(["models", "chat", "api"], edits.chatApi);
+  }
+  if (edits.chatBaseUrl !== undefined) {
+    const url = new URL(textField(edits.chatBaseUrl, "chat endpoint", 2000));
+    if (
+      !["https:", "http:"].includes(url.protocol) ||
+      url.username ||
+      url.password
+    )
+      throw new Error("Invalid chat endpoint.");
+    doc.setIn(["models", "chat", "base_url"], String(edits.chatBaseUrl));
+  }
+  if (edits.chatKeyName !== undefined) {
+    const key = textField(edits.chatKeyName, "API key name");
+    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(key) || key in Object.prototype)
+      throw new Error("Invalid API key name.");
+    doc.setIn(["models", "chat", "api_key_env"], key);
+  }
+  if (edits.maxTokens !== undefined) {
+    if (edits.maxTokens === "")
+      doc.deleteIn(["models", "chat", "params", "max_tokens"]);
+    else
+      doc.setIn(
+        ["models", "chat", "params", "max_tokens"],
+        numberField(Number(edits.maxTokens), 1, 1000000),
+      );
+  }
+  if (edits.reasoningEffort !== undefined) {
+    if (edits.reasoningEffort === "")
+      doc.deleteIn(["models", "chat", "params", "reasoning_effort"]);
+    else
+      doc.setIn(
+        ["models", "chat", "params", "reasoning_effort"],
+        textField(edits.reasoningEffort, "reasoning effort"),
+      );
+  }
+  if (edits.dropTags !== undefined) {
+    if (typeof edits.dropTags !== "string")
+      throw new Error("Invalid delivery tags.");
+    doc.setIn(
+      ["voice", "drop_tags"],
+      edits.dropTags
+        .split(",")
+        .map((s) => s.trim())
+        .filter(Boolean),
+    );
+  }
   if (edits.temperature !== undefined)
     doc.setIn(
       ["models", "chat", "params", "temperature"],

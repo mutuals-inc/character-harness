@@ -1,68 +1,34 @@
 import { state } from "../store.ts";
 import { escape as e } from "../lib/dom.ts";
 import { icon } from "../lib/icons.ts";
-import { toggle } from "./forms.ts";
 
-const descriptions: Record<string, string> = {
-  on_session_start: "A session opens. Prepare memories or connect a service.",
-  before_reply:
-    "Decide whether to reply. Runs alongside prompt building and the model.",
-  before_llm: "Build the prompt. Recall memories and add useful context.",
-  after_llm: "The complete reply is ready. Observe or log the response.",
-  on_sentence:
-    "A sentence is voiced. Stage emotions, gestures and camera moves.",
-  on_speak: "Audio and word timing are ready. Synchronize the performance.",
-  after_turn: "The turn closes. Store memories, metrics or rewards.",
-  on_session_end: "The session closes. Consolidate memories and clean up.",
-};
-
-export function hooksView(selected = "on_sentence") {
-  const { character: c, hooks } = state.bootstrap!;
-  return `<div class="hooks-intro"><p>Small pieces of behavior, connected at the right moment.</p><span class="tag">${hooks.length} lifecycle hooks</span></div><div class="hooks-layout"><section class="surface hook-pipeline"><div class="surface-heading"><div><span class="eyebrow">THE LIFE OF A CONVERSATION</span><h2>Every moment has a hook.</h2></div></div><div class="hook-list" role="list">${hooks
-    .map((name, i) => {
-      const count = c.extensions.filter(
-        (x) =>
-          name in x.hooks &&
-          !state.settings.disabledExtensions.includes(x.name),
-      ).length;
-      return `<button class="hook-step ${name === selected ? "selected" : ""}" data-hook="${e(name)}" aria-pressed="${name === selected}"><span class="step-number">${String(i + 1).padStart(2, "0")}</span><span><code>${e(name)}</code><small>${e(descriptions[name])}</small></span><span class="hook-count">${count || "—"}</span>${icon("chevron", 15)}</button>`;
-    })
-    .join(
-      "",
-    )}</div><p class="pipeline-note">${icon("hooks", 16)} <code>before_reply</code> runs in parallel with prompt building. Every other hook follows the turn lifecycle.</p></section><div class="hook-details"><section class="surface"><span class="eyebrow">SELECTED HOOK</span><h2 class="code-heading">${e(selected)}</h2><p class="hook-description">${e(descriptions[selected])}</p><div class="hook-binding-list">${
-    c.extensions
-      .filter((ext) => selected in ext.hooks)
+let query = "";
+let page = 1;
+const pageSize = 9;
+export function hooksView() {
+  return `<div class="extension-library"><div class="library-toolbar"><label class="extension-search">${icon("search", 18)}<input type="search" id="extension-search" aria-label="Search extensions" placeholder="Search extensions…" value="${e(query)}"/></label><button class="button primary" data-action="upload-extension">${icon("plus", 17)} Upload extension</button></div><p class="subtle">Install once. Each character chooses which extensions run, their order, and their configuration.</p><div class="extension-current surface"><div><strong>Extensions for ${e(state.bootstrap!.character.name)}</strong><p class="subtle">Enable behaviors and edit their configuration in the character.</p></div><button class="button" data-action="configure-extensions">${icon("settings", 17)} Configure character</button></div><div id="extension-results">${extensionCards()}</div></div><dialog id="extension-upload-dialog"><form id="extension-upload-form" class="dialog-form"><div class="surface-heading"><h2>Upload extension</h2><button type="button" class="icon-button" data-action="close-extension-upload" aria-label="Close upload">${icon("close")}</button></div><p class="subtle">Choose a ZIP containing extension.yaml, its handler, and optional defaults.yaml. Maximum 20 MB. Installed packages are shared; nothing is enabled automatically.</p><label>Extension package<input type="file" name="package" accept=".zip,application/zip" required/></label><label class="extension-trust"><input type="checkbox" name="trusted" required/><span>I trust this package. Extensions can run local code with access to files, network and provider keys.</span></label><p id="extension-upload-error" class="form-error" role="alert"></p><div class="form-actions"><button type="button" class="button" data-action="close-extension-upload">Cancel</button><button type="submit" class="button primary">${icon("plus", 17)} Install extension</button></div></form></dialog>`;
+}
+function extensionCards() {
+  const all = state.bootstrap!.availableExtensions;
+  const matching = all.filter((ext) =>
+    `${ext.name} ${ext.description ?? ""}`
+      .toLowerCase()
+      .includes(query.toLowerCase().trim()),
+  );
+  const pages = Math.max(1, Math.ceil(matching.length / pageSize));
+  page = Math.min(page, pages);
+  return `<p class="subtle extension-count">${matching.length} ${matching.length === 1 ? "extension" : "extensions"}</p><div class="extension-library-grid">${
+    matching
+      .slice((page - 1) * pageSize, page * pageSize)
       .map(
         (ext) =>
-          `<div class="binding"><span class="dot"></span><strong>${e(ext.name)}</strong><span>${ext.hooks[selected].blocking ? `${ext.hooks[selected].timeout_ms} ms · blocking` : "Non-blocking"}</span></div>`,
+          `<article class="surface installed-extension"><span class="extension-symbol">${icon("hooks", 22)}</span><h2>${e(ext.name)}</h2><p class="subtle">${e(ext.description || "Adds behavior at specific points in a conversation.")}</p><details class="extension-capabilities"><summary>${ext.hooks.length} lifecycle ${ext.hooks.length === 1 ? "hook" : "hooks"}${icon("down", 15)}</summary><ul>${ext.hooks.map((hook) => `<li>${e(hook.replace(/_/g, " "))}</li>`).join("")}</ul></details></article>`,
       )
-      .join("") ||
-    '<p class="empty-inline">No extension is bound here. The runtime supports this hook whenever a character needs it.</p>'
-  }</div></section>
-    <section class="surface extensions"><div class="surface-heading"><div><span class="eyebrow">CHARACTER EXTENSIONS</span><h2>Behind the personality.</h2></div></div><p class="subtle">Switches apply to the next studio session. Shared extension files stay unchanged.</p>${c.extensions
-      .map(
-        (ext) =>
-          `<article class="extension-card">${toggle(ext.name, `ext-${ext.name}`, !state.settings.disabledExtensions.includes(ext.name))}<code class="extension-handler">${e(ext.handler)}</code><div class="hook-tags">${Object.keys(
-            ext.hooks,
-          )
-            .map(
-              (h) =>
-                `<button class="code-tag" data-hook="${e(h)}">${e(h)}</button>`,
-            )
-            .join(
-              "",
-            )}</div><details><summary>Hook settings & requirements</summary><dl>${Object.entries(
-            ext.hooks,
-          )
-            .map(
-              ([hook, opts]) =>
-                `<dt><code>${e(hook)}</code></dt><dd>${opts.blocking ? `Blocking · ${opts.timeout_ms} ms timeout` : "Non-blocking · returned state is discarded"}</dd>`,
-            )
-            .join(
-              "",
-            )}</dl><p class="subtle">Requires: ${e(ext.keys.join(", ") || "No provider keys")}. Hook timing and handler configuration are defined in the extension manifest.</p></details></article>`,
-      )
-      .join(
-        "",
-      )}</section><div class="info-note">${icon("file", 18)}<p>Add behavior as an extension in the harness. The studio reads each character’s manifest, so new extensions appear here automatically after reloading.</p></div></div></div>`;
+      .join("") || '<p class="empty-state">No extensions match your search.</p>'
+  }</div>${pages > 1 ? `<nav class="extension-pagination" aria-label="Extension pages"><button class="button" data-extension-page="${page - 1}" ${page === 1 ? "disabled" : ""}>Previous</button><span>${page} / ${pages}</span><button class="button" data-extension-page="${page + 1}" ${page === pages ? "disabled" : ""}>Next</button></nav>` : ""}`;
+}
+export function renderExtensionCards(search = query, nextPage = 1) {
+  query = search;
+  page = nextPage;
+  document.getElementById("extension-results")!.innerHTML = extensionCards();
 }
