@@ -30,7 +30,7 @@ A character is a folder with a manifest, a personality prompt and a body: any VR
 |---|---|
 | `runtime/` | The conversation loop, and the preparation of VRM models and their animations for the player. |
 | `player/` | The app that shows the character. Building it needs a Kaigen licence; using a release build doesn't. |
-| `extensions/` | Plug-ins that run on every turn: `emotion-tags` changes the face from a sentence's delivery tag, `director` stages each line, `memory` remembers what the user tells the character, `reactions` starts each reply with how the character took what the user said. |
+| `extensions/` | Plug-ins that run on every turn: `emotion-tags` changes the face from a sentence's delivery tag, `director` stages each line, `memory` remembers what the user tells the character, `reactions` starts each reply with how the character took what the user said, `game-link` lets the character play games built with neuro-sdk. |
 | `examples/` | Example extensions to copy from. `gesture-cues` is the one `docs/your-first-extension.md` builds. |
 | `characters/` | Character manifests. `foxglove/` is the reference character. |
 | `docs/` | How the pieces fit. Start with `docs/architecture.md`. |

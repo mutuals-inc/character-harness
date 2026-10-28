@@ -1,0 +1,9 @@
+name: game-link
+handler: index.ts
+hooks:
+  # puts what the game said in the prompt, and its actions in `tools`
+  before_llm: { timeout_ms: 500 }
+  # sends the game the action the character called, and waits a little for its answer
+  on_tool_call: { timeout_ms: 3000 }
+# the server games connect to, open for the whole session
+service: true
