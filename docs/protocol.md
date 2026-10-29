@@ -49,6 +49,7 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 | `text` | `id` | What happened | What follows |
 |---|---|---|---|
 | `llm_<status>`, `llm_network`, `llm_failed`, `llm_empty` | the reply's | the chat model failed: an HTTP error, no connection, an error partway through the reply, or a reply with no text | no `llm_done`; any `llm_calls` already sent stand |
+| `runtime_failed` | the reply's | the runtime itself failed on the reply (a bug, or a hook that handed back a state it can't read); it is logged, and `after_turn` still runs with `error` set | no `llm_done`; any `llm_calls` already sent stand |
 | `llm_busy`, `tts_busy` | the request's | too many replies (2) or sentences (8) in flight, or a reply (for `llm`) or sentence (for `tts`) on the same `id` still in flight; the request was not run | nothing more for the refused request; one already in flight on that `id` goes on |
 | `tts_<status>`, `tts_network`, `tts_connect`, `tts_dropped` | the sentence's | the voice failed | no `tts_done`; the app may ask for the sentence again with the same `id` |
 | `stt_upstream` | `0` | speech to text could not connect | it tries again after a wait that grows from 1 s to 15 s, as soon as there is mic audio or an `stt_eos` to send |
@@ -59,11 +60,11 @@ When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, tex
 
 A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.
 
-A turn where the chat model only called tools (see "Tools" in `architecture.md`) is its `llm_calls`, then a single `{t:"llm_delta", id, text:"[acted]"}`, then `llm_done` with its `entries`. The app voices `[acted]` as silence, like `…`. It is plain text, not a field of `llm_done`, because an app that keeps only the reply's text (the player) needs a reply with text, and keeps `[acted]` in its history so the model can tell the turn from a silent reply. Both strings are `SILENT_TURN` and `ACTED_TURN` in `runtime/src/markers.ts`; the app and the bundled extensions write them out again, and a test checks the app's agree.
+A turn where the chat model only called tools (see "Tools" in `architecture.md`) is its `llm_calls`, then a single `{t:"llm_delta", id, text:"[acted]"}`, then `llm_done` with its `entries`. The app voices `[acted]` as silence, like `…`. It is plain text, not a field of `llm_done`, because an app that keeps only the reply's text (the player) needs a reply with text, and keeps `[acted]` in its history so the model can tell the turn from a silent reply. Both strings are `SILENT_TURN` and `ACTED_TURN` in `runtime/src/markers.ts`; the app and the bundled extensions write them out again, and tests check theirs agree.
 
 ### Tools in the history
 
-Each time the calls of a reply have run, the app gets `{t:"llm_calls", id, entries}`: the model's message that made them (what it said and its calls) and each call's result. The app adds them to what it keeps for the reply, in place of the text they hold, so a reply that fails (`error`) or that the app cuts off afterwards still has them. Text that streams after an `llm_calls` is not in its entries: if no `llm_done` comes, the app sends it in the history after them, as an `assistant` message, so the model knows it was said. A call still running when the app sends `cancel` has its `signal` aborted and is not sent.
+Each time a call of a reply has run, the app gets `{t:"llm_calls", id, entries}`: an assistant message with that call, and its result. Calls the model made together run side by side, so each comes in its own `llm_calls` as it finishes; the first of them carries what the reply said before them, the others `""`. The app adds them to what it keeps for the reply, in place of the text they hold, so a reply that fails (`error`) or that the app cuts off afterwards still has them, even when it cut the reply off while a slower call still ran. Text that streams after an `llm_calls` is not in its entries: if no `llm_done` comes, the app sends it in the history after them, as an `assistant` message, so the model knows it was said. A call still running when the app sends `cancel` has its `signal` aborted and is not sent.
 
 A reply that called tools ends with `{t:"llm_done", id, entries}`. `entries` is everything the reply adds to the history, in order, and replaces what `llm_calls` brought: each time the model was asked, what it said and the calls it made, then each call's result, and last what it said after them: `[acted]` when it said nothing, or `…` when it answered its silent reply.
 
@@ -75,7 +76,7 @@ A reply that called tools ends with `{t:"llm_done", id, entries}`. `entries` is 
 ]
 ```
 
-The app keeps them as they are and sends them back in later `history`, so the model sees what it did. It may still mark the last one `interrupted`, or cut its `content` to what was voiced. The runtime puts each call's result right after its call, drops a result without one, and gives a call with no result one that says so. An `[acted]` right after the results is dropped, so the model reads a reply that only acted as its calls and their results, not as a silent reply.
+`llm_done` puts the calls the model made together back in one message. The app keeps them as they are and sends them back in later `history`, so the model sees what it did. An assistant message that only calls tools may have `content: null`, as Chat Completions writes it. It may still mark the last one `interrupted`, or cut its `content` to what was voiced. The runtime puts each call's result right after its call, drops a result without one, and gives a call with no result one that says so. An `[acted]` right after the results is dropped, so the model reads a reply that only acted as its calls and their results, not as a silent reply.
 
 An app that keeps only the reply's text still works: it ignores `llm_calls`, keeps `[acted]` for a reply that only acted, which the model reads as `…` (not as the silent reply), and the model doesn't see its earlier calls.
 

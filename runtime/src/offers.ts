@@ -151,7 +151,11 @@ export function pendingResultText(name: string, content: string): string {
 		.replace(new RegExp(CONTROL.source, "g"), " ");
 	const cut = " … (cut short)";
 	const room = OFFER_TEXT_MAX - head.length;
-	return head + (clean.length > room ? clean.slice(0, Math.max(0, room - cut.length)) + cut : clean);
+	if (clean.length <= room) return head + clean;
+	let end = Math.max(0, room - cut.length);
+	// not between the two halves of a character outside the BMP, like an emoji
+	if (end > 0 && /[\uD800-\uDBFF]/.test(clean[end - 1])) end--;
+	return head + clean.slice(0, end) + cut;
 }
 
 export function checkOffer(req: OfferRequest): void {

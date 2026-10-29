@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import { test, type TestContext } from "node:test";
 import WebSocket from "ws";
 import { runTool } from "../src/extensions.ts";
+import { streamChat } from "../src/llm.ts";
 import type { HookInput, Loaded } from "../src/extensions.ts";
 import type { Character } from "../src/manifest.ts";
 import type { HookName } from "../src/state.ts";
@@ -617,7 +618,9 @@ test("a call streamed in pieces goes whole to the extension whose tool it is, an
 	assert.deepEqual(ran, [{ ...call("call_1", '{"item":"key"}'), by: "kit" }, { ...call("call_2"), by: "kit" }]);
 	assert.deepEqual(s.sentFor(5), [
 		{ t: "llm_delta", id: 5, text: "Here goes." },
-		callsRan([asked("Here goes.", call("call_1", '{"item":"key"}'), call("call_2")), result("call_1", "Done."), result("call_2", "Done.")]),
+		// each call goes to the app once it ran, the first with what the round said
+		callsRan([asked("Here goes.", call("call_1", '{"item":"key"}')), result("call_1", "Done.")]),
+		callsRan([asked("", call("call_2")), result("call_2", "Done.")]),
 		done([asked("Here goes.", call("call_1", '{"item":"key"}'), call("call_2")), result("call_1", "Done."), result("call_2", "Done."), acted]),
 	]);
 	assert.deepEqual(seen.state?.tool_calls, [
@@ -760,7 +763,8 @@ test("the Responses API gets its own tool shape, and the call and its result as 
 	);
 	s.app({ t: "llm", id: 5, history });
 	await until(() => s.logged("turn 5: replied"), "the reply");
-	assert.deepEqual(s.bodies[0].tools, [{ type: "function", ...useItem }]);
+	// not strict, which the Responses API would make it otherwise
+	assert.deepEqual(s.bodies[0].tools, [{ type: "function", ...useItem, strict: false }]);
 	assert.deepEqual(s.bodies[1].input, [
 		...history,
 		{ role: "assistant", content: "Fine." },
@@ -1185,5 +1189,244 @@ test("a silent reply that writes on keeps the calls it finished before the text,
 	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item"), "the turn");
 	assert.equal(s.calls[0].aborted, true);
 	assert.deepEqual(ran, [{ ...call("c", '{"item":"key"}'), by: "kit" }]);
+	await s.close();
+});
+
+test("a call with no arguments, streamed as nothing, isn't held back by a silent reply that writes on", async (t) => {
+	const { exts: list, ran } = acting([useItem]);
+	const enc = new TextEncoder();
+	const open = (events: unknown[], signal: AbortSignal) =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					for (const e of events) c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+				},
+			}),
+		);
+	const s = session(
+		t,
+		(_n, signal) =>
+			open([said("[pass]"), piece(0, { name: "use_item", arguments: "" }, "a"), piece(1, { name: "use_item", arguments: '{"item":"key"}' }, "b"), said("x".repeat(250))], signal),
+		list,
+		quiet,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item, use_item"), "the turn");
+	assert.equal(s.calls[0].aborted, true);
+	assert.deepEqual(ran, [{ ...call("a"), by: "kit" }, { ...call("b", '{"item":"key"}'), by: "kit" }]);
+	await s.close();
+});
+
+test("a stream stopped partway still hands over its last call when it was whole, and not one cut off", async (t) => {
+	const enc = new TextEncoder();
+	// each request's body: one call, with nothing after it, then the stream stays open
+	const bodies = [piece(0, { name: "use_item", arguments: '{"item":"key"}' }, "a"), piece(0, { name: "use_item", arguments: '{"it' }, "b")];
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		const signal = init.signal as AbortSignal;
+		const e = bodies.shift();
+		return new Response(
+			new ReadableStream({
+				start(c) {
+					c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+				},
+			}),
+		);
+	});
+	const read = async () => {
+		const ac = new AbortController();
+		const got: unknown[] = [];
+		setTimeout(() => ac.abort(), 20);
+		for await (const p of streamChat(character.chat, "key", history as never, ac.signal, [useItem])) got.push(p);
+		return got;
+	};
+	assert.deepEqual(await read(), [call("a", '{"item":"key"}')]);
+	assert.deepEqual(await read(), []);
+});
+
+test("parallel calls at one index stay apart when the first has no id", async (t) => {
+	const { exts: list, ran } = acting([useItem]);
+	const s = session(
+		t,
+		(n) =>
+			n === 0
+				? sse([piece(0, { name: "use_item", arguments: '{"item":"key"}' }), piece(0, { name: "use_item", arguments: '{"item":"map"}' }, "b")])
+				: noText(),
+		list,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item, use_item"), "the turn");
+	assert.deepEqual(ran, [{ ...call("call_5_0_0", '{"item":"key"}'), by: "kit" }, { ...call("b", '{"item":"map"}'), by: "kit" }]);
+	await s.close();
+});
+
+test("an assistant message in the history that only calls tools, with null content, keeps its calls and results", async (t) => {
+	const past = [
+		{ role: "user", content: "use the key" },
+		{ role: "assistant", content: null, tool_calls: [call("a")] },
+		{ role: "tool", tool_call_id: "a", content: "used" },
+		{ role: "user", content: "hi" },
+	];
+	const s = session(t, () => reply("ok"));
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), [
+		past[0],
+		{ role: "assistant", content: null, tool_calls: [{ id: "a", type: "function", function: { name: "use_item", arguments: "{}" } }] },
+		past[2],
+		past[3],
+	]);
+	await s.close();
+});
+
+test("an assistant message before_llm leaves with no text reaches the model as empty, not a failure", async (t) => {
+	const s = session(t, () => reply("ok"), [
+		exts("window", {
+			before_llm: ({ state }) => ({ state: { ...state, messages: [{ role: "assistant", content: null as unknown as string }, ...state.messages!] } }),
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), [{ role: "assistant", content: "" }, ...history]);
+	await s.close();
+});
+
+test("a turn the runtime fails on still ends, with an error the app is told, and after_turn runs", async (t) => {
+	const seen: { error?: unknown } = {};
+	let broken = true;
+	const s = session(t, () => reply("ok"), [
+		exts("broken", {
+			// once, a message that isn't one: the runtime can't read it
+			before_llm: ({ state }) => {
+				if (!broken) return;
+				broken = false;
+				return { state: { ...state, messages: [null as never] } };
+			},
+			after_turn: ({ state }) => { seen.error = state.error; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: the runtime failed"), "the failure");
+	assert.deepEqual(s.sentFor(5), [{ t: "error", id: 5, text: "runtime_failed" }]);
+	assert.equal(s.calls.length, 0);
+	await until(() => seen.error !== undefined, "after_turn");
+	assert.equal(seen.error, "runtime_failed");
+	// the id is free again
+	s.app({ t: "llm", id: 5, history: [] });
+	await until(() => s.logged("turn 5: replied"), "the next reply");
+	await s.close();
+});
+
+test("a call that ran goes to the app at once, so a barge-in while a slower one runs keeps it", async (t) => {
+	const slow = gate();
+	const seen: { calls?: unknown } = {};
+	const wait = { ...useItem, name: "wait" };
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "fast"), piece(1, { name: "wait", arguments: "{}" }, "slow")]), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem, wait] } }),
+			on_tool_call: async ({ call }) => {
+				if (call!.name === "wait") await slow.shut;
+				return { result: { content: `${call!.name} ran` } };
+			},
+			after_turn: ({ state }) => { seen.calls = state.tool_calls; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.sentFor(5).length === 1, "the fast call");
+	assert.deepEqual(s.sentFor(5), [callsRan([asked("", { id: "fast", name: "use_item", arguments: "{}" }), result("fast", "use_item ran")])]);
+	// the user talks over the character while the slow call still runs
+	s.app({ t: "cancel", id: 5 });
+	slow.open();
+	await until(() => s.logged("turn 5: cut off by the app"), "the turn");
+	// the slow call ran after the cancel, so the app never got it
+	assert.equal(s.sentFor(5).length, 1);
+	s.app({ t: "llm", id: 6, history });
+	await until(() => seen.calls !== undefined, "turn 5's after_turn");
+	assert.deepEqual(seen.calls, [
+		{ id: "fast", name: "use_item", arguments: "{}", by: "kit", result: "use_item ran" },
+		{ id: "slow", name: "wait", arguments: "{}", by: "kit", result: "wait ran" },
+	]);
+	await s.close();
+});
+
+test("parallel calls reach after_turn in the order the model made them, whichever finished first", async (t) => {
+	const first = gate();
+	const seen: { calls?: { id: string }[] } = {};
+	const s = session(t, (n) => (n === 0 ? sse([piece(0, { name: "use_item", arguments: "{}" }, "a"), piece(1, { name: "use_item", arguments: "{}" }, "b")]) : noText()), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }),
+			on_tool_call: async ({ call }) => {
+				if (call!.id === "a") await first.shut;
+			},
+			after_llm: ({ state }) => { seen.calls = state.tool_calls as { id: string }[]; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.sentFor(5).length === 1, "b to finish");
+	first.open();
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(seen.calls?.map((c) => c.id), ["a", "b"]);
+	// the app got them as they finished, b first with what the round said
+	assert.deepEqual(s.sentFor(5).slice(0, 2), [callsRan([asked("", call("b")), result("b", "Done.")]), callsRan([asked("", call("a")), result("a", "Done.")])]);
+	await s.close();
+});
+
+test("a turn a newer one closed runs no more calls and asks the model no more, so after_turn sees all it did", async (t) => {
+	const held = gate();
+	const late = gate();
+	const enc = new TextEncoder();
+	const seen: { turn?: number; calls?: unknown }[] = [];
+	let ran = 0;
+	const s = session(
+		t,
+		(n) => {
+			if (n === 0) return sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]);
+			if (n === 1) return reply("ok");
+			// turn 7's reply makes its call only after turn 8 has closed it
+			if (n === 2)
+				return new Response(
+					new ReadableStream({
+						async start(c) {
+							await late.shut;
+							c.enqueue(enc.encode(`data: ${JSON.stringify(piece(0, { name: "use_item", arguments: "{}" }, "d"))}\n\ndata: [DONE]\n\n`));
+							c.close();
+						},
+					}),
+				);
+			return reply("ok");
+		},
+		[
+			exts("kit", {
+				before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }),
+				on_tool_call: async () => {
+					ran++;
+					await held.shut;
+					// a result the model would read, so an open turn would ask again
+					return { result: { content: "used" } };
+				},
+				after_turn: ({ state }) => { seen.push({ turn: state.turn, calls: state.tool_calls }); },
+			}),
+		],
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => ran === 1, "turn 5's call");
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: replied"), "the newer reply");
+	held.open();
+	await until(() => seen.length === 1, "turn 5's after_turn");
+	assert.deepEqual(seen[0], { turn: 5, calls: [{ ...call("c"), by: "kit", result: "used" }] });
+	await until(() => s.logged("turn 5:"), "turn 5 to end");
+	// turn 5 asked the model once, turn 6 once
+	assert.equal(s.calls.length, 2);
+
+	s.app({ t: "llm", id: 7, history });
+	await until(() => s.calls.length === 3, "turn 7's model");
+	s.app({ t: "llm", id: 8, history });
+	await until(() => s.logged("turn 8: replied"), "turn 8");
+	late.open();
+	await until(() => s.logged("turn 7:"), "turn 7 to end");
+	assert.equal(ran, 1);
+	assert.deepEqual(s.sentFor(7), [{ t: "llm_delta", id: 7, text: "…" }, { t: "llm_done", id: 7 }]);
 	await s.close();
 });

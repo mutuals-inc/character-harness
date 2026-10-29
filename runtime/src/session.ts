@@ -91,7 +91,11 @@ interface Turn {
 	idle: ReturnType<typeof setTimeout> | undefined;
 	// the calls running now; after_turn waits for them, so it sees each one that ran
 	running?: Promise<unknown>;
+	answered: boolean; // its `llm_done` or `error` has gone out
 }
+
+// what the app gets for a reply the runtime itself failed on
+const RUNTIME_FAILED = "runtime_failed";
 
 // what a call with no result in the history gets, since the APIs want one
 const NO_RESULT = "No result.";
@@ -111,12 +115,18 @@ function toMessages(history: unknown): Message[] {
 	if (!Array.isArray(history)) return [];
 	const ms: Message[] = [];
 	for (const h of history) {
+		// an assistant message that only calls tools may have no content, as
+		// Chat Completions writes it
+		const calls = h?.role === "assistant" ? toCalls(h.tool_calls) : [];
+		if (calls.length && (h.content === null || h.content === undefined)) {
+			ms.push({ role: "assistant", content: "", tool_calls: calls });
+			continue;
+		}
 		// the system prompt is the character's; the app only sends the conversation
 		if (typeof h?.content !== "string") continue;
 		// the app's `interrupted` marker is not for the model
 		if (h.role === "user") ms.push({ role: "user", content: h.content });
 		else if (h.role === "assistant") {
-			const calls = toCalls(h.tool_calls);
 			ms.push(calls.length ? { role: "assistant", content: h.content, tool_calls: calls } : { role: "assistant", content: h.content });
 		} else if (h.role === "tool" && typeof h.tool_call_id === "string") ms.push({ role: "tool", content: h.content, tool_call_id: h.tool_call_id });
 	}
@@ -334,7 +344,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 
 	const offers = new Offers(hub, log);
 	const services = new AbortController();
-	const running: Promise<void>[] = [];
+	const serviceLoops: Promise<void>[] = [];
 
 	const elevenKey = process.env[ELEVENLABS_KEY] ?? "";
 	const heard = new Heard();
@@ -436,7 +446,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				wait = Math.min(wait * 2, SERVICE_RETRY_MS[1]);
 			}
 		};
-		running.push(loop());
+		serviceLoops.push(loop());
 	};
 	void started.then(() => {
 		if (closed) return;
@@ -454,6 +464,27 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			return;
 		}
 		if (turn) void closeTurn(turn);
+		let t: Turn | undefined;
+		try {
+			t = newTurn(id, history, source);
+			await reply(t, ac);
+		} catch (err) {
+			// A bug, or a hook that handed back what the runtime can't read: the
+			// turn still ends, so the app isn't left waiting on it.
+			log(`turn ${id}: the runtime failed: ${err instanceof Error ? err.message : String(err)}`);
+			ac.abort();
+			if (llmStreams.get(id) === ac) llmStreams.delete(id);
+			if (!closed && !cancelledByApp.has(ac) && !t?.answered) send({ t: "error", id, text: RUNTIME_FAILED });
+			if (!t || t.llmDone) return;
+			if (!t.answered) t.state.error ??= RUNTIME_FAILED;
+			t.answered = true;
+			t.llmDone = true;
+			settle(t);
+		}
+	};
+
+	// The turn an `llm` starts, and the open one from now on
+	const newTurn = (id: number, history: unknown, source: unknown): Turn => {
 		const messages = toMessages(history);
 		const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 		// a turn the player took from an offer names the offer's source
@@ -471,12 +502,19 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			firstSentence: true,
 			closed: false,
 			idle: undefined,
+			answered: false,
 		};
 		turn = t;
+		return t;
+	};
+
+	const reply = async (t: Turn, ac: AbortController) => {
+		const id = t.id;
 		// what this turn adds to the conversation when it calls tools: each
 		// round's text and calls, their results, and the last round's text
 		const entries: Message[] = [];
 		const calls: ToolCall[] = [];
+		const ranks: number[] = []; // each of `calls`, its place among its round's
 		const finish = (how: string) => {
 			// the app may have reused the id for a newer reply
 			if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -486,6 +524,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		};
 		const silent = () => {
 			t.state.cancel = true;
+			t.answered = true;
 			send({ t: "llm_delta", id, text: SILENT_TURN });
 			// it ran no call: before_llm cancelled before any, or before_reply did
 			send({ t: "llm_done", id });
@@ -554,11 +593,14 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const asSaid = (ms: Message[]): Message[] =>
 			ms.flatMap((m, i) => {
 				if (m.role !== "assistant" || m.tool_calls) return [m];
+				// before_llm may have written a message with no text
+				if (typeof m.content !== "string") return [{ ...m, content: "" }];
 				if (m.content.trim() === ACTED_TURN) return ms[i - 1]?.role === "tool" ? [] : [{ ...m, content: SILENT_TURN }];
 				return token && m.content.trim() === SILENT_TURN ? [{ ...m, content: token }] : [m];
 			});
 		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...asSaid(paired(t.state.messages ?? []))];
 		let quiet = false; // the last round answered the silent reply
+		let unrun = false; // the model made calls the closed turn didn't run
 		let failure: string | null = null;
 		for (let round = 0; round < MAX_ROUNDS; round++) {
 			// before_reply may have cancelled the turn already
@@ -596,9 +638,9 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 					// the model said nothing, and may still be calling a tool
 					if (quiet) {
 						tail += piece.length;
-						if (tail <= SILENT_TAIL_CHARS) continue;
-						rc.abort();
-						break;
+						// stopped, the stream still hands over the calls that were whole
+						if (tail > SILENT_TAIL_CHARS) rc.abort();
+						continue;
 					}
 					if (!maybeSilent) {
 						keep(piece);
@@ -626,9 +668,11 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				ac.signal.removeEventListener("abort", stop);
 			}
 			// no call runs until before_reply has let the reply through, so a turn
-			// it cancels has done nothing
+			// it cancels has done nothing; nor once a newer turn closed this one, so
+			// its after_turn sees every call it ran
 			const go = !failure && made.length > 0 && !(await replyCancelled);
-			if (!go || closed || ac.signal.aborted) {
+			if (go && t.closed) unrun = true;
+			if (!go || closed || t.closed || ac.signal.aborted) {
 				if (calls.length) entries.push({ role: "assistant", content: quiet ? SILENT_TURN : spoken.trim() ? spoken.trimStart() : ACTED_TURN });
 				break;
 			}
@@ -639,31 +683,46 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				const by = kept.find((k) => k.tool.name === c.name)?.by;
 				if (by) c.by = by;
 			}
-			// The calls ran, so however the turn ends, after_turn sees them: they are
-			// in its state before anything waiting on them goes on.
-			const running = Promise.all(made.map(runCall)).then((results) => {
-				for (const [i, c] of made.entries()) calls.push({ ...c, result: resultText(results[i]) });
-				t.state.tool_calls = calls;
-				return results;
-			});
-			t.running = running;
-			const results = await running;
-			const asked: Message = { role: "assistant", content: quiet ? "" : spoken.trimStart(), tool_calls: made.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) };
+			const content = quiet ? "" : spoken.trimStart();
+			const bare = (c: ToolCall): ToolCall => ({ id: c.id, name: c.name, arguments: c.arguments });
+			// Each call, once it ran, is in after_turn's state and goes to the app,
+			// so however the turn ends, both have it, even with a slower one still
+			// running. The first to finish carries what the round said.
+			let told = false;
+			const base = calls.length;
+			const ran = Promise.all(
+				made.map(async (c, i) => {
+					const r = await runCall(c);
+					// in the order the model made them, whichever finished first
+					const at = ranks.findIndex((k, j) => j >= base && k > i);
+					const where = at < 0 ? calls.length : at;
+					calls.splice(where, 0, { ...c, result: resultText(r) });
+					ranks.splice(where, 0, i);
+					t.state.tool_calls = calls;
+					// unless the app has cut the turn off and expects nothing more
+					if (!closed && !cancelledByApp.has(ac)) {
+						send({ t: "llm_calls", id, entries: [{ role: "assistant", content: told ? "" : content, tool_calls: [bare(c)] }, { role: "tool", tool_call_id: c.id, content: resultText(r) }] });
+						told = true;
+					}
+					return r;
+				}),
+			);
+			t.running = ran;
+			const results = await ran;
+			const asked: Message = { role: "assistant", content, tool_calls: made.map(bare) };
 			const answers = made.map((c, i): Message => ({ role: "tool", tool_call_id: c.id, content: resultText(results[i]) }));
-			// the app keeps them too, unless it has cut the turn off and expects nothing more
-			if (!closed && !cancelledByApp.has(ac)) send({ t: "llm_calls", id, entries: [asked, ...answers] });
 			request.push(asked, ...answers);
 			entries.push(asked, ...answers);
 			// the model is asked again when there is a result or an error to read
 			const read = results.some((r) => r !== undefined && !("pending" in r));
-			if (closed || ac.signal.aborted || !read || last) {
+			if (closed || t.closed || ac.signal.aborted || !read || last) {
 				entries.push({ role: "assistant", content: ACTED_TURN });
 				break;
 			}
 		}
 		if (decided && !ac.signal.aborted && !closed) release();
 		// a reply with no text and no call would leave the app waiting on the model
-		if (!failure && !said.trim() && !quiet && !calls.length && !ac.signal.aborted && !closed) failure = "llm_empty";
+		if (!failure && !said.trim() && !quiet && !calls.length && !unrun && !ac.signal.aborted && !closed) failure = "llm_empty";
 		const cancelled = await replyCancelled;
 		if (closed) return;
 		// a barge-in: the app tore the turn down and expects nothing more for it
@@ -674,6 +733,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		t.state.reply = said.trim() ? said.trimStart() : quiet ? token : "";
 		if (failure) {
 			t.state.error = failure;
+			t.answered = true;
 			send({ t: "error", id, text: failure });
 			return finish(`failed: ${failure}`);
 		}
@@ -682,6 +742,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// still sees the reply. One that acted still answered, so it isn't cancelled.
 		if (nothing && !calls.length) t.state.cancel = true;
 		if (nothing) send({ t: "llm_delta", id, text: calls.length ? ACTED_TURN : SILENT_TURN });
+		t.answered = true;
 		send(entries.length ? { t: "llm_done", id, entries } : { t: "llm_done", id });
 		// the reply is done; after_llm below no longer counts against the limit
 		if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -854,8 +915,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// a reply still running on this id is refused, so the id keeps naming the
 		// running one and it can still be cancelled and counted; one an extension
 		// silenced is still winding down, so it counts as running until it's done
-		const running = llmStreams.get(id as number);
-		const live = running !== undefined && !cancelledByApp.has(running);
+		const sameId = llmStreams.get(id as number);
+		const live = sameId !== undefined && !cancelledByApp.has(sameId);
 		if (msg.t === "llm" && (replying >= MAX_LLM_IN_FLIGHT || live)) {
 			send({ t: "error", id, text: "llm_busy" });
 			return;
@@ -878,10 +939,10 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		stt.close();
 		offers.close();
 		services.abort();
-		if (running.length) {
+		if (serviceLoops.length) {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const late = new Promise<void>((r) => { timer = setTimeout(r, SERVICE_STOP_MS); });
-			await Promise.race([Promise.allSettled(running), late]);
+			await Promise.race([Promise.allSettled(serviceLoops), late]);
 			clearTimeout(timer);
 		}
 		if (turn) await closeTurn(turn);

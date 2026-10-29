@@ -552,3 +552,14 @@ test("a pending call's result is made to fit an offer, and a bad request rejects
 	await assert.rejects(returned!, /ttl_ms/);
 	await s.close();
 });
+
+test("a long pending result is cut between characters, not inside an emoji", () => {
+	const head = "The result of play_song: ";
+	const cut = " … (cut short)";
+	// the cut falls right after the first half of an emoji
+	const before = OFFER_TEXT_MAX - head.length - cut.length - 1;
+	const text = pendingResultText("play_song", "x".repeat(before) + "🎵".repeat(1000));
+	assert.ok(text.endsWith(`x${cut}`));
+	assert.equal(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text), false);
+	assert.ok(text.length <= OFFER_TEXT_MAX);
+});
