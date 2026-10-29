@@ -91,7 +91,11 @@ interface Turn {
 	idle: ReturnType<typeof setTimeout> | undefined;
 	// the calls running now; after_turn waits for them, so it sees each one that ran
 	running?: Promise<unknown>;
+	answered: boolean; // its `llm_done` or `error` has gone out
 }
+
+// what the app gets for a reply the runtime itself failed on
+const RUNTIME_FAILED = "runtime_failed";
 
 // what a call with no result in the history gets, since the APIs want one
 const NO_RESULT = "No result.";
@@ -460,6 +464,27 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			return;
 		}
 		if (turn) void closeTurn(turn);
+		let t: Turn | undefined;
+		try {
+			t = newTurn(id, history, source);
+			await reply(t, ac);
+		} catch (err) {
+			// A bug, or a hook that handed back what the runtime can't read: the
+			// turn still ends, so the app isn't left waiting on it.
+			log(`turn ${id}: the runtime failed: ${err instanceof Error ? err.message : String(err)}`);
+			ac.abort();
+			if (llmStreams.get(id) === ac) llmStreams.delete(id);
+			if (!closed && !cancelledByApp.has(ac) && !t?.answered) send({ t: "error", id, text: RUNTIME_FAILED });
+			if (!t || t.llmDone) return;
+			if (!t.answered) t.state.error ??= RUNTIME_FAILED;
+			t.answered = true;
+			t.llmDone = true;
+			settle(t);
+		}
+	};
+
+	// The turn an `llm` starts, and the open one from now on
+	const newTurn = (id: number, history: unknown, source: unknown): Turn => {
 		const messages = toMessages(history);
 		const lastUser = [...messages].reverse().find((m) => m.role === "user")?.content ?? "";
 		// a turn the player took from an offer names the offer's source
@@ -477,8 +502,14 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			firstSentence: true,
 			closed: false,
 			idle: undefined,
+			answered: false,
 		};
 		turn = t;
+		return t;
+	};
+
+	const reply = async (t: Turn, ac: AbortController) => {
+		const id = t.id;
 		// what this turn adds to the conversation when it calls tools: each
 		// round's text and calls, their results, and the last round's text
 		const entries: Message[] = [];
@@ -492,6 +523,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		};
 		const silent = () => {
 			t.state.cancel = true;
+			t.answered = true;
 			send({ t: "llm_delta", id, text: SILENT_TURN });
 			// it ran no call: before_llm cancelled before any, or before_reply did
 			send({ t: "llm_done", id });
@@ -560,6 +592,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const asSaid = (ms: Message[]): Message[] =>
 			ms.flatMap((m, i) => {
 				if (m.role !== "assistant" || m.tool_calls) return [m];
+				// before_llm may have written a message with no text
+				if (typeof m.content !== "string") return [{ ...m, content: "" }];
 				if (m.content.trim() === ACTED_TURN) return ms[i - 1]?.role === "tool" ? [] : [{ ...m, content: SILENT_TURN }];
 				return token && m.content.trim() === SILENT_TURN ? [{ ...m, content: token }] : [m];
 			});
@@ -680,6 +714,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		t.state.reply = said.trim() ? said.trimStart() : quiet ? token : "";
 		if (failure) {
 			t.state.error = failure;
+			t.answered = true;
 			send({ t: "error", id, text: failure });
 			return finish(`failed: ${failure}`);
 		}
@@ -688,6 +723,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// still sees the reply. One that acted still answered, so it isn't cancelled.
 		if (nothing && !calls.length) t.state.cancel = true;
 		if (nothing) send({ t: "llm_delta", id, text: calls.length ? ACTED_TURN : SILENT_TURN });
+		t.answered = true;
 		send(entries.length ? { t: "llm_done", id, entries } : { t: "llm_done", id });
 		// the reply is done; after_llm below no longer counts against the limit
 		if (llmStreams.get(id) === ac) llmStreams.delete(id);

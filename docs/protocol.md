@@ -49,6 +49,7 @@ The first sentence of a reply always gets an empty `beat` before any of its audi
 | `text` | `id` | What happened | What follows |
 |---|---|---|---|
 | `llm_<status>`, `llm_network`, `llm_failed`, `llm_empty` | the reply's | the chat model failed: an HTTP error, no connection, an error partway through the reply, or a reply with no text | no `llm_done`; any `llm_calls` already sent stand |
+| `runtime_failed` | the reply's | the runtime itself failed on the reply (a bug, or a hook that handed back a state it can't read); it is logged, and `after_turn` still runs with `error` set | no `llm_done`; any `llm_calls` already sent stand |
 | `llm_busy`, `tts_busy` | the request's | too many replies (2) or sentences (8) in flight, or a reply (for `llm`) or sentence (for `tts`) on the same `id` still in flight; the request was not run | nothing more for the refused request; one already in flight on that `id` goes on |
 | `tts_<status>`, `tts_network`, `tts_connect`, `tts_dropped` | the sentence's | the voice failed | no `tts_done`; the app may ask for the sentence again with the same `id` |
 | `stt_upstream` | `0` | speech to text could not connect | it tries again after a wait that grows from 1 s to 15 s, as soon as there is mic audio or an `stt_eos` to send |

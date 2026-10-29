@@ -1277,3 +1277,41 @@ test("an assistant message in the history that only calls tools, with null conte
 	]);
 	await s.close();
 });
+
+test("an assistant message before_llm leaves with no text reaches the model as empty, not a failure", async (t) => {
+	const s = session(t, () => reply("ok"), [
+		exts("window", {
+			before_llm: ({ state }) => ({ state: { ...state, messages: [{ role: "assistant", content: null as unknown as string }, ...state.messages!] } }),
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), [{ role: "assistant", content: "" }, ...history]);
+	await s.close();
+});
+
+test("a turn the runtime fails on still ends, with an error the app is told, and after_turn runs", async (t) => {
+	const seen: { error?: unknown } = {};
+	let broken = true;
+	const s = session(t, () => reply("ok"), [
+		exts("broken", {
+			// once, a message that isn't one: the runtime can't read it
+			before_llm: ({ state }) => {
+				if (!broken) return;
+				broken = false;
+				return { state: { ...state, messages: [null as never] } };
+			},
+			after_turn: ({ state }) => { seen.error = state.error; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: the runtime failed"), "the failure");
+	assert.deepEqual(s.sentFor(5), [{ t: "error", id: 5, text: "runtime_failed" }]);
+	assert.equal(s.calls.length, 0);
+	await until(() => seen.error !== undefined, "after_turn");
+	assert.equal(seen.error, "runtime_failed");
+	// the id is free again
+	s.app({ t: "llm", id: 5, history: [] });
+	await until(() => s.logged("turn 5: replied"), "the next reply");
+	await s.close();
+});
