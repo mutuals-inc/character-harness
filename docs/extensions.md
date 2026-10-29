@@ -45,7 +45,7 @@ extensions:
 
 The runtime passes `config` to the extension untouched. For a long config, `config_file` names a YAML file in the character's folder instead.
 
-Four extensions ship with the harness: `emotion-tags` changes the face from the tag that opens each sentence, `director` stages each sentence with beats (see "Beats" in `architecture.md`), `memory` remembers what the user tells the character about their life, and `reactions` starts each reply with how the character took what the user said.
+Five extensions ship with the harness: `emotion-tags` changes the face from the tag that opens each sentence, `director` stages each sentence with beats (see "Beats" in `architecture.md`), `memory` remembers what the user tells the character about their life, `reactions` starts each reply with how the character took what the user said, and `game-link` lets the character play games that speak the Neuro API.
 
 ## Handlers
 
@@ -155,10 +155,11 @@ const outcome = await offer({ text: "@ana asked in chat: what's your favorite so
 | `quiet_ms` | `2000` | how long the voice must have been idle before the offer goes out, so the character doesn't take the floor the moment it stops. At most a day |
 | `ttl_ms` | `10000` | how long the offer may wait. Past it, the offer resolves `expired`. At most a day |
 | `priority` | `0` | higher goes first; among equals, the oldest |
+| `signal` | none | an `AbortSignal` that withdraws the offer when aborted, for one that no longer makes sense, like a question the service has since replaced. One the player is already deciding on may still be taken: if its answer comes too late, `offer` has resolved `withdrawn`, but the turn still names the service in `input.offered_by` |
 
 The runtime keeps a queue per session and hands one offer at a time to the player, only while its voice is idle. After the player takes one, nothing else goes out until that turn has started, or the voice has stayed idle for 5 s more. If the player refuses one because someone just started speaking, it goes back in the queue and waits for the next quiet moment. A taken offer is an ordinary turn. The player sends it back as the user's line, and its `input` has `channel` set to the offer's `source` and `offered_by` set to the extension's name.
 
-`offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
+`offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, `withdrawn` when its `signal` was aborted first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
 
 `examples/extensions/dead-air` is the smallest service: it offers one line once the voice has been quiet for a while.
 
@@ -181,6 +182,7 @@ The extensions in `extensions/` ship with the harness and show the shape:
 | `director` | `on_sentence` blocking (10 s), `on_session_end` non-blocking | asks a second model to stage each line: an emotion, a talking style, a gesture and a camera move per phrase |
 | `memory` | `before_llm` blocking (1.5 s), `after_turn` and `on_session_end` non-blocking | asks Typesafe's Jev whether what the user said is worth keeping, keeps it in their own words in a tree per character, marks what it makes out of date, and puts what the character remembers in the prompt. See `extensions/memory/README.md` |
 | `reactions` | `before_reply` blocking (1.5 s), `on_sentence` blocking (500 ms), `on_session_end` non-blocking | asks Typesafe's Jev how the character takes the user's message, and starts the reply's first sentence with a beat: the emotion that fits and maybe a gesture. List it after `emotion-tags` and before `director`. See `extensions/reactions/README.md` |
+| `game-link` | `before_llm` blocking (500 ms), `on_tool_call` (3 s), and a service | the server games built with neuro-sdk connect to. It puts what a game says in the prompt and its actions in `tools` (see "Tools" in `architecture.md`), offers a turn when the game speaks up or forces an action, and sends the game the action the character calls, with the game's answer as its result. No character lists it by default; add it to one, then start the game with `NEURO_SDK_WS_URL=ws://127.0.0.1:8000`. See `extensions/game-link/README.md` |
 | `dead-air` (in `examples/extensions/`) | none; a service | speaks up after a while of quiet: it offers the character a line saying nobody has spoken, then waits out a cooldown. See `examples/extensions/dead-air/README.md` |
 
 ### The director's config

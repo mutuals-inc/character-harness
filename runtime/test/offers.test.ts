@@ -177,6 +177,82 @@ test("an ack that comes late still counts: the offer is taken once, not offered 
 	o.close();
 });
 
+test("an offer whose signal is aborted leaves the queue, and the next one goes out", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	assert.equal(await o.offer({ text: "too late", signal: AbortSignal.abort() }, "x"), "withdrawn");
+	const ac = new AbortController();
+	const old = o.offer({ text: "old", quiet_ms: 0, priority: 2, signal: ac.signal }, "x");
+	const next = o.offer({ text: "new", quiet_ms: 0, priority: 1 }, "x");
+	ac.abort();
+	assert.equal(await old, "withdrawn");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	assert.equal(hub.offers()[0].text, "new");
+	hub.player({ t: "ack", id: 1, accepted: true });
+	assert.equal(await next, "accepted");
+	o.close();
+});
+
+test("an offer withdrawn while the player has it is over if refused, and taken if accepted", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const ac = new AbortController();
+	const refused = o.offer({ text: "one", quiet_ms: 0, signal: ac.signal }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	ac.abort();
+	hub.player({ t: "ack", id: 1, accepted: false });
+	assert.equal(await refused, "withdrawn");
+	hub.player({ t: "status", voice: "idle", epoch: 1 });
+	await pause(10);
+	assert.equal(hub.offers().length, 1, "a withdrawn offer doesn't go out again");
+
+	const ac2 = new AbortController();
+	const taken = o.offer({ text: "two", quiet_ms: 0, signal: ac2.signal }, "x");
+	await until(() => hub.offers().length === 2, "the second offer");
+	ac2.abort();
+	hub.player({ t: "ack", id: 2, accepted: true });
+	assert.equal(await taken, "accepted");
+	o.close();
+});
+
+test("an offer withdrawn while out, and over when its ack never came, is still the turn the player takes after all", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const ac = new AbortController();
+	const outcome = o.offer({ text: "one", source: "game", quiet_ms: 0, signal: ac.signal }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	ac.abort();
+	await pause(OFFER_ACK_MS + 50);
+	assert.equal(await outcome, "withdrawn");
+	// the player took it after all: its turn names it, and holds the next offer
+	hub.player({ t: "ack", id: 1, accepted: true });
+	const next = o.offer({ text: "two", quiet_ms: 0 }, "y");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await pause(20);
+	assert.equal(hub.offers().length, 1);
+	const taken = o.take("one");
+	assert.equal(taken?.by, "x");
+	assert.equal(taken?.source, "game");
+	// one whose ack is lost with the link is found by its turn's text too
+	hub.player({ t: "status", voice: "speaking", epoch: 1 });
+	hub.player({ t: "status", voice: "idle", epoch: 2 });
+	await until(() => hub.offers().length === 2, "the next offer");
+	hub.player({ t: "ack", id: 2, accepted: true });
+	assert.equal(await next, "accepted");
+	const ac3 = new AbortController();
+	void o.offer({ text: "three", quiet_ms: 0, signal: ac3.signal }, "z");
+	hub.player({ t: "status", voice: "speaking", epoch: 3 });
+	hub.player({ t: "status", voice: "idle", epoch: 4 });
+	await until(() => hub.offers().length === 3, "the third offer");
+	ac3.abort();
+	hub.player("closed");
+	assert.equal(o.take("three")?.by, "z");
+	o.close();
+});
+
 test("a turn that names an offer whose ack never came settles it as taken", async () => {
 	const hub = fakeHub();
 	const o = new Offers(hub, () => {});
@@ -248,6 +324,7 @@ test("an offer needs text, and its source is a word", () => {
 	assert.throws(() => o.offer({ text: "hi", ttl_ms: Number.NaN }, "x"), /ttl_ms/);
 	assert.throws(() => o.offer({ text: "hi", quiet_ms: 2 ** 31 * 10 }, "x"), /quiet_ms/);
 	assert.throws(() => o.offer({ text: "hi\u0000there" }, "x"), /control characters/);
+	assert.throws(() => o.offer({ text: "hi", signal: {} as AbortSignal }, "x"), /signal/);
 	assert.doesNotThrow(() => void o.offer({ text: "two\nlines\tand a tab" }, "x"));
 	o.close();
 });
