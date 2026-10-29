@@ -109,7 +109,7 @@ No call runs until `before_reply` has let the turn through, so a turn the gate o
 
 A tool is the extension's that added it. The runtime sets each tool's `by` itself, so a `by` an extension writes on a tool it adds is ignored: an extension can't send calls to another one's `on_tool_call`. A tool whose extension has no `on_tool_call` gives the model an error, not `Done.`.
 
-A tool that answers `pending` gives its result later from the extension's service, with `result(call, content)` (see "Services"). It offers a turn that hands the model the result.
+A tool that answers `pending` gives its result later from the extension's service, with `result(call, content)` (see "Services"). It offers a turn that hands the model the result. That turn is an offer, so its text is held to an offer's limits: `result` makes it fit rather than refuse it. A `\r` becomes a newline, any other control character but a tab a space, and text past 4000 characters (with `The result of <name>: ` in front) is cut short, saying so. A result `on_tool_call` hands back at once has no such limit.
 
 ## Services
 
@@ -131,7 +131,7 @@ export async function service({ config, session, signal, log, ext, offer, result
 | `log(line)` | writes a line to the runtime's log |
 | `ext.get()` / `ext.set(value)` | read and replace the extension's own `state.ext.<name>`. A write is kept for the session, and the next hook sees it, even one running on the turn already open |
 | `offer(req)` | offers a turn (below). Resolves to `accepted`, `expired` or `closed` |
-| `result(call, content, req?)` | offers a turn with the result of a call whose tool answered `pending`, with `source: tool`. `req` takes the rest of an offer's keys |
+| `result(call, content, req?)` | offers a turn with the result of a call whose tool answered `pending`, with `source: tool`, cut to fit an offer (see "Tools"). `req` takes the rest of an offer's keys; one that isn't valid rejects the promise |
 | `voice.state` | what the player's voice is doing: `idle`, `listening`, `thinking`, `speaking`, or `offline` when the player has no offers link |
 | `voice.since` | `Date.now()` when `voice.state` last changed |
 | `voice.on(fn)` | calls `fn(state)` on every change; returns the function that stops it |

@@ -49,7 +49,7 @@ import { Heard } from "./utterances.ts";
 import { Tts } from "./tts.ts";
 import { Alignment } from "./align.ts";
 import { Leveler } from "./level.ts";
-import { Offers } from "./offers.ts";
+import { Offers, pendingResultText } from "./offers.ts";
 import type { LinkHub } from "./offers.ts";
 import type { AlignmentChunk } from "./align.ts";
 
@@ -401,7 +401,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				},
 			},
 			offer: (req) => offers.offer(req, e.name),
-			result: (call, content, req) => offers.offer({ ...req, text: `The result of ${call.name}: ${content}`, source: "tool" }, e.name),
+			// an `req` that isn't a valid offer rejects, like any other failure here
+			result: async (call, content, req) => offers.offer({ ...req, text: pendingResultText(call.name, content), source: "tool" }, e.name),
 			voice: {
 				get state() {
 					return offers.voice;
