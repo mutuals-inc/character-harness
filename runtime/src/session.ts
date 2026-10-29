@@ -344,7 +344,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 
 	const offers = new Offers(hub, log);
 	const services = new AbortController();
-	const running: Promise<void>[] = [];
+	const serviceLoops: Promise<void>[] = [];
 
 	const elevenKey = process.env[ELEVENLABS_KEY] ?? "";
 	const heard = new Heard();
@@ -446,7 +446,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				wait = Math.min(wait * 2, SERVICE_RETRY_MS[1]);
 			}
 		};
-		running.push(loop());
+		serviceLoops.push(loop());
 	};
 	void started.then(() => {
 		if (closed) return;
@@ -915,8 +915,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// a reply still running on this id is refused, so the id keeps naming the
 		// running one and it can still be cancelled and counted; one an extension
 		// silenced is still winding down, so it counts as running until it's done
-		const running = llmStreams.get(id as number);
-		const live = running !== undefined && !cancelledByApp.has(running);
+		const sameId = llmStreams.get(id as number);
+		const live = sameId !== undefined && !cancelledByApp.has(sameId);
 		if (msg.t === "llm" && (replying >= MAX_LLM_IN_FLIGHT || live)) {
 			send({ t: "error", id, text: "llm_busy" });
 			return;
@@ -939,10 +939,10 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		stt.close();
 		offers.close();
 		services.abort();
-		if (running.length) {
+		if (serviceLoops.length) {
 			let timer: ReturnType<typeof setTimeout> | undefined;
 			const late = new Promise<void>((r) => { timer = setTimeout(r, SERVICE_STOP_MS); });
-			await Promise.race([Promise.allSettled(running), late]);
+			await Promise.race([Promise.allSettled(serviceLoops), late]);
 			clearTimeout(timer);
 		}
 		if (turn) await closeTurn(turn);
