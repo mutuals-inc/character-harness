@@ -760,7 +760,8 @@ test("the Responses API gets its own tool shape, and the call and its result as 
 	);
 	s.app({ t: "llm", id: 5, history });
 	await until(() => s.logged("turn 5: replied"), "the reply");
-	assert.deepEqual(s.bodies[0].tools, [{ type: "function", ...useItem }]);
+	// not strict, which the Responses API would make it otherwise
+	assert.deepEqual(s.bodies[0].tools, [{ type: "function", ...useItem, strict: false }]);
 	assert.deepEqual(s.bodies[1].input, [
 		...history,
 		{ role: "assistant", content: "Fine." },

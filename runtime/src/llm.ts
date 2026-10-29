@@ -15,7 +15,9 @@
 // Tools the turn offers go with the request in each API's own shape, and the
 // calls the model makes come back beside the text. So do the calls and results
 // in the conversation: an assistant message's `tool_calls` and the tool
-// messages after it.
+// messages after it. Tools go as non-strict on both APIs: the Responses API
+// makes a tool strict when it isn't told otherwise, which turns its optional
+// parameters into required ones, and Chat Completions doesn't.
 
 import type { ChatModel } from "./manifest.ts";
 import type { Message, Tool, ToolCall, ToolChoice } from "./state.ts";
@@ -81,7 +83,7 @@ function request(m: ChatModel, messages: Message[], tools: Tool[], choice?: Tool
 			...(instructions ? { instructions } : {}),
 			input: messages.filter((x) => x.role !== "system").flatMap(responseItems),
 			...(tools.length
-				? { tools: tools.map((t) => ({ type: "function", name: t.name, description: t.description ?? "", parameters: parameters(t) })) }
+				? { tools: tools.map((t) => ({ type: "function", name: t.name, description: t.description ?? "", parameters: parameters(t), strict: false })) }
 				: {}),
 			...(pick !== undefined ? { tool_choice: typeof pick === "string" ? pick : { type: "function", name: pick.name } } : {}),
 			...(reasoning_effort !== undefined ? { reasoning: { effort: reasoning_effort } } : {}),
