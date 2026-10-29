@@ -596,3 +596,19 @@ test("a force found unwinnable on its turn drops only itself, not a newer force"
 	assert.equal((s.ext().force as { query: string } | null)?.query, "Pick a target.");
 	assert.equal(s.lines.some((l) => l.includes("so the force was dropped")), false);
 });
+
+test("what games say while an offer waits goes out newest first, as much of it as one offer holds", async (t) => {
+	let release = (_: string) => {};
+	const s = await served(t, (req) => (req.text.endsWith("first") ? new Promise<string>((r) => { release = r; }) : "accepted"));
+	const g = await game(s.url);
+	g.send("context", { message: "first", silent: false });
+	await until(() => s.offers.length === 1, "the first offer");
+	for (let i = 1; i <= 10; i++) g.send("context", { message: `m${i} ${"x".repeat(1500)}`, silent: false });
+	await until(() => s.ext().context.length === 11, "the messages");
+	release("expired");
+	await until(() => s.offers.length === 2, "the second offer");
+	const text = s.offers[1].text as string;
+	assert.ok(text.length <= OFFER_TEXT_MAX);
+	// the oldest that don't fit are left out, whole
+	assert.deepEqual(text.split("\n").map((l) => l.split(" ")[2]), ["m9", "m10"]);
+});

@@ -252,7 +252,7 @@ class Link {
 				if (!message) return;
 				this.note(`${name}: ${message}`);
 				if (data.silent !== true) {
-					this.said.push(`${name}: ${plain(message)}`);
+					this.say(`${name}: ${message}`);
 					void this.speak().catch((e) => this.ctx.log(`offering what ${name} said failed: ${e instanceof Error ? e.message : String(e)}`));
 				}
 				break;
@@ -454,6 +454,14 @@ class Link {
 		if (g.ws.readyState === g.ws.OPEN) g.ws.send(JSON.stringify({ command, data }));
 	}
 
+	// Keeps a line said out loud for the next offer. They go out together, so
+	// only the newest that fit in one are kept.
+	private say(line: string) {
+		this.said.push(cut(plain(line), MAX_OFFER));
+		let size = this.said.reduce((n, l) => n + l.length + 1, -1);
+		while (size > MAX_OFFER) size -= this.said.shift()!.length + 1;
+	}
+
 	private note(line: string) {
 		this.context.push(cut(plain(line), MAX_LINE));
 		if (this.context.length > this.c.context_lines) this.context.splice(0, this.context.length - this.c.context_lines);
@@ -477,7 +485,7 @@ class Link {
 		this.speaking = true;
 		try {
 			while (this.said.length && !this.ctx.signal.aborted) {
-				const text = cut(this.said.splice(0).join("\n"), MAX_OFFER);
+				const text = this.said.splice(0).join("\n");
 				if ((await this.offer({ text, source: "game", ttl_ms: 30_000 })) === "closed") return;
 			}
 		} finally {
