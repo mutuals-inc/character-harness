@@ -100,18 +100,20 @@ export class LlmStreamError extends Error {}
 // What one streamed `data:` payload adds: text, and the calls it finishes.
 // Chat Completions streams each call in pieces, by index, so they wait in
 // `calls`, in the order they began. One is handed over once something comes
-// after it, another call or text, and its arguments are a whole JSON object;
-// the rest when the stream ends. So a reply stopped partway (a silent reply
-// that writes on) keeps the calls it finished, as on the Responses API, which
-// hands each call over whole as its item is done. Throws LlmStreamError on an
-// error event.
+// after it, another call or text, and its arguments are whole: a JSON object,
+// or nothing, as some servers send for a call with no arguments; the rest
+// when the stream ends, or when it is stopped, those whose arguments are whole.
+// So a reply stopped partway (a silent reply that writes on) keeps the calls it
+// finished, as on the Responses API, which hands each call over whole as its
+// item is done. Throws LlmStreamError on an error event.
 interface Pending {
 	calls: ToolCall[];
 	at: Map<number, number>; // a piece's index -> the call in `calls` it adds to
 	out: number; // how many of `calls`, from the first, were handed over
 }
 
-const isObject = (args: string) => {
+const isWhole = (args: string) => {
+	if (!args.trim()) return true;
 	try {
 		const v = JSON.parse(args);
 		return typeof v === "object" && v !== null && !Array.isArray(v);
@@ -152,7 +154,7 @@ function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done
 		const done: ToolCall[] = [];
 		while (pending.out < calls.length && (text || pending.out < calls.length - 1)) {
 			const call = calls[pending.out];
-			if (!call.name || !isObject(call.arguments)) break;
+			if (!call.name || !isWhole(call.arguments)) break;
 			done.push(call);
 			pending.out++;
 		}
@@ -173,8 +175,10 @@ function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done
 
 // Yields the reply as it streams: its text, and each tool call once it is
 // whole. Throws LlmHttpError on a non-2xx answer, LlmStreamError on an error
-// in the stream, and whatever fetch throws on a network failure or an abort.
-// A reply cut short (response.incomplete) ends with what was written.
+// in the stream, and whatever fetch throws on a network failure or an abort
+// before the answer starts. A reply cut short (response.incomplete) ends with
+// what was written, and so does one `signal` stops while it streams: a reader
+// that aborts and reads on gets the calls that were whole.
 export async function* streamChat(
 	m: ChatModel,
 	apiKey: string,
@@ -194,22 +198,28 @@ export async function* streamChat(
 	const dec = new TextDecoder();
 	const pending: Pending = { calls: [], at: new Map(), out: 0 };
 	let buf = "";
-	for await (const chunk of resp.body) {
-		buf += dec.decode(chunk, { stream: true });
-		let nl: number;
-		while ((nl = buf.indexOf("\n")) >= 0) {
-			const line = buf.slice(0, nl).trim();
-			buf = buf.slice(nl + 1);
-			if (!line.startsWith("data:")) continue;
-			const data = line.slice(5).trim();
-			if (data === "[DONE]") continue;
-			let j: unknown;
-			try { j = JSON.parse(data); } catch { continue; }
-			const { text, done } = delta(m, j, pending);
-			// calls the text came after go first, so a reader stopped by the text has them
-			yield* done;
-			if (text) yield text;
+	let stopped = false;
+	try {
+		for await (const chunk of resp.body) {
+			buf += dec.decode(chunk, { stream: true });
+			let nl: number;
+			while ((nl = buf.indexOf("\n")) >= 0) {
+				const line = buf.slice(0, nl).trim();
+				buf = buf.slice(nl + 1);
+				if (!line.startsWith("data:")) continue;
+				const data = line.slice(5).trim();
+				if (data === "[DONE]") continue;
+				let j: unknown;
+				try { j = JSON.parse(data); } catch { continue; }
+				const { text, done } = delta(m, j, pending);
+				// calls the text came after go first, so a reader stopped by the text has them
+				yield* done;
+				if (text) yield text;
+			}
 		}
+	} catch (e) {
+		if (!signal.aborted) throw e;
+		stopped = true;
 	}
-	for (const call of pending.calls.slice(pending.out)) if (call.name) yield call;
+	for (const call of pending.calls.slice(pending.out)) if (call.name && (!stopped || isWhole(call.arguments))) yield call;
 }

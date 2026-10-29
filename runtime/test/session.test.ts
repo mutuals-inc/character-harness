@@ -7,6 +7,7 @@ import { EventEmitter } from "node:events";
 import { test, type TestContext } from "node:test";
 import WebSocket from "ws";
 import { runTool } from "../src/extensions.ts";
+import { streamChat } from "../src/llm.ts";
 import type { HookInput, Loaded } from "../src/extensions.ts";
 import type { Character } from "../src/manifest.ts";
 import type { HookName } from "../src/state.ts";
@@ -1187,4 +1188,57 @@ test("a silent reply that writes on keeps the calls it finished before the text,
 	assert.equal(s.calls[0].aborted, true);
 	assert.deepEqual(ran, [{ ...call("c", '{"item":"key"}'), by: "kit" }]);
 	await s.close();
+});
+
+test("a call with no arguments, streamed as nothing, isn't held back by a silent reply that writes on", async (t) => {
+	const { exts: list, ran } = acting([useItem]);
+	const enc = new TextEncoder();
+	const open = (events: unknown[], signal: AbortSignal) =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					for (const e of events) c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+				},
+			}),
+		);
+	const s = session(
+		t,
+		(_n, signal) =>
+			open([said("[pass]"), piece(0, { name: "use_item", arguments: "" }, "a"), piece(1, { name: "use_item", arguments: '{"item":"key"}' }, "b"), said("x".repeat(250))], signal),
+		list,
+		quiet,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item, use_item"), "the turn");
+	assert.equal(s.calls[0].aborted, true);
+	assert.deepEqual(ran, [{ ...call("a"), by: "kit" }, { ...call("b", '{"item":"key"}'), by: "kit" }]);
+	await s.close();
+});
+
+test("a stream stopped partway still hands over its last call when it was whole, and not one cut off", async (t) => {
+	const enc = new TextEncoder();
+	// each request's body: one call, with nothing after it, then the stream stays open
+	const bodies = [piece(0, { name: "use_item", arguments: '{"item":"key"}' }, "a"), piece(0, { name: "use_item", arguments: '{"it' }, "b")];
+	t.mock.method(globalThis, "fetch", async (_url: string, init: RequestInit) => {
+		const signal = init.signal as AbortSignal;
+		const e = bodies.shift();
+		return new Response(
+			new ReadableStream({
+				start(c) {
+					c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+				},
+			}),
+		);
+	});
+	const read = async () => {
+		const ac = new AbortController();
+		const got: unknown[] = [];
+		setTimeout(() => ac.abort(), 20);
+		for await (const p of streamChat(character.chat, "key", history as never, ac.signal, [useItem])) got.push(p);
+		return got;
+	};
+	assert.deepEqual(await read(), [call("a", '{"item":"key"}')]);
+	assert.deepEqual(await read(), []);
 });

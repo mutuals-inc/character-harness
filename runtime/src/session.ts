@@ -596,9 +596,9 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 					// the model said nothing, and may still be calling a tool
 					if (quiet) {
 						tail += piece.length;
-						if (tail <= SILENT_TAIL_CHARS) continue;
-						rc.abort();
-						break;
+						// stopped, the stream still hands over the calls that were whole
+						if (tail > SILENT_TAIL_CHARS) rc.abort();
+						continue;
 					}
 					if (!maybeSilent) {
 						keep(piece);
