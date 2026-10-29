@@ -97,29 +97,38 @@ export class LlmStreamError extends Error {}
 
 // What one streamed `data:` payload adds: text, and the calls it finishes.
 // Chat Completions streams each call in pieces, by index, and the pieces are
-// whole only once the stream ends, so they wait in `calls` until then; the
-// Responses API hands each call over whole as its item is done. Throws
-// LlmStreamError on an error event.
-type Pending = Map<number, ToolCall>;
+// whole only once the stream ends, so they wait in `calls` until then, in the
+// order they began; the Responses API hands each call over whole as its item
+// is done. Throws LlmStreamError on an error event.
+interface Pending {
+	calls: ToolCall[];
+	at: Map<number, number>; // a piece's index -> the call in `calls` it adds to
+}
 
-function delta(m: ChatModel, j: unknown, calls: Pending): { text: string; done: ToolCall[] } {
+function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done: ToolCall[] } {
 	const failed = (what: unknown) => new LlmStreamError(`the model failed: ${JSON.stringify(what).slice(0, 200)}`);
 	if (m.api === "chat_completions") {
 		type Piece = { index?: number; id?: string; function?: { name?: string; arguments?: string } };
 		const c = j as { error?: unknown; choices?: Array<{ delta?: { content?: string; tool_calls?: Piece[] } }> };
 		if (c.error) throw failed(c.error);
 		const d = c.choices?.[0]?.delta;
+		const { calls, at } = pending;
 		for (const p of d?.tool_calls ?? []) {
-			// without an index, a piece that brings a new id starts a new call
-			const last = Math.max(-1, ...calls.keys());
-			const lastId = calls.get(last)?.id;
-			const at = p.index ?? (last < 0 || (p.id && lastId && p.id !== lastId) ? last + 1 : last);
-			const call = calls.get(at) ?? { id: "", name: "", arguments: "" };
+			// A piece goes on the call its index names, or without an index the last
+			// one. One that brings an id other than that call's starts a new call:
+			// some servers send every parallel call at index 0.
+			const index = typeof p.index === "number" ? p.index : undefined;
+			let i = index !== undefined ? at.get(index) : calls.length - 1;
+			const was = i !== undefined && i >= 0 ? calls[i] : undefined;
+			if (!was || (p.id && was.id && p.id !== was.id)) {
+				i = calls.push({ id: "", name: "", arguments: "" }) - 1;
+				if (index !== undefined) at.set(index, i);
+			}
+			const call = calls[i!];
 			if (p.id) call.id = p.id;
 			// some servers repeat the whole name on every piece
 			if (p.function?.name && !call.name) call.name = p.function.name;
 			if (p.function?.arguments) call.arguments += p.function.arguments;
-			calls.set(at, call);
 		}
 		return { text: d?.content ?? "", done: [] };
 	}
@@ -157,7 +166,7 @@ export async function* streamChat(
 	});
 	if (!resp.ok || !resp.body) throw new LlmHttpError(resp.status);
 	const dec = new TextDecoder();
-	const calls: Pending = new Map();
+	const pending: Pending = { calls: [], at: new Map() };
 	let buf = "";
 	for await (const chunk of resp.body) {
 		buf += dec.decode(chunk, { stream: true });
@@ -170,10 +179,10 @@ export async function* streamChat(
 			if (data === "[DONE]") continue;
 			let j: unknown;
 			try { j = JSON.parse(data); } catch { continue; }
-			const { text, done } = delta(m, j, calls);
+			const { text, done } = delta(m, j, pending);
 			if (text) yield text;
 			yield* done;
 		}
 	}
-	for (const [, call] of [...calls].sort((a, b) => a[0] - b[0])) if (call.name) yield call;
+	for (const call of pending.calls) if (call.name) yield call;
 }
