@@ -75,7 +75,7 @@ A reply that called tools ends with `{t:"llm_done", id, entries}`. `entries` is 
 ]
 ```
 
-The app keeps them as they are and sends them back in later `history`, so the model sees what it did. It may still mark the last one `interrupted`, or cut its `content` to what was voiced. The runtime puts each call's result right after its call, drops a result without one, and gives a call with no result one that says so. An `[acted]` right after the results is dropped, so the model reads a reply that only acted as its calls and their results, not as a silent reply.
+The app keeps them as they are and sends them back in later `history`, so the model sees what it did. An assistant message that only calls tools may have `content: null`, as Chat Completions writes it. It may still mark the last one `interrupted`, or cut its `content` to what was voiced. The runtime puts each call's result right after its call, drops a result without one, and gives a call with no result one that says so. An `[acted]` right after the results is dropped, so the model reads a reply that only acted as its calls and their results, not as a silent reply.
 
 An app that keeps only the reply's text still works: it ignores `llm_calls`, keeps `[acted]` for a reply that only acted, which the model reads as `…` (not as the silent reply), and the model doesn't see its earlier calls.
 

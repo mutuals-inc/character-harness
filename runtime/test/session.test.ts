@@ -1258,3 +1258,22 @@ test("parallel calls at one index stay apart when the first has no id", async (t
 	assert.deepEqual(ran, [{ ...call("call_5_0_0", '{"item":"key"}'), by: "kit" }, { ...call("b", '{"item":"map"}'), by: "kit" }]);
 	await s.close();
 });
+
+test("an assistant message in the history that only calls tools, with null content, keeps its calls and results", async (t) => {
+	const past = [
+		{ role: "user", content: "use the key" },
+		{ role: "assistant", content: null, tool_calls: [call("a")] },
+		{ role: "tool", tool_call_id: "a", content: "used" },
+		{ role: "user", content: "hi" },
+	];
+	const s = session(t, () => reply("ok"));
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), [
+		past[0],
+		{ role: "assistant", content: null, tool_calls: [{ id: "a", type: "function", function: { name: "use_item", arguments: "{}" } }] },
+		past[2],
+		past[3],
+	]);
+	await s.close();
+});

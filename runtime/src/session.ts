@@ -111,12 +111,18 @@ function toMessages(history: unknown): Message[] {
 	if (!Array.isArray(history)) return [];
 	const ms: Message[] = [];
 	for (const h of history) {
+		// an assistant message that only calls tools may have no content, as
+		// Chat Completions writes it
+		const calls = h?.role === "assistant" ? toCalls(h.tool_calls) : [];
+		if (calls.length && (h.content === null || h.content === undefined)) {
+			ms.push({ role: "assistant", content: "", tool_calls: calls });
+			continue;
+		}
 		// the system prompt is the character's; the app only sends the conversation
 		if (typeof h?.content !== "string") continue;
 		// the app's `interrupted` marker is not for the model
 		if (h.role === "user") ms.push({ role: "user", content: h.content });
 		else if (h.role === "assistant") {
-			const calls = toCalls(h.tool_calls);
 			ms.push(calls.length ? { role: "assistant", content: h.content, tool_calls: calls } : { role: "assistant", content: h.content });
 		} else if (h.role === "tool" && typeof h.tool_call_id === "string") ms.push({ role: "tool", content: h.content, tool_call_id: h.tool_call_id });
 	}
