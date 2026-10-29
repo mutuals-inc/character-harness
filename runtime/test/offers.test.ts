@@ -217,6 +217,42 @@ test("an offer withdrawn while the player has it is over if refused, and taken i
 	o.close();
 });
 
+test("an offer withdrawn while out, and over when its ack never came, is still the turn the player takes after all", async () => {
+	const hub = fakeHub();
+	const o = new Offers(hub, () => {});
+	const ac = new AbortController();
+	const outcome = o.offer({ text: "one", source: "game", quiet_ms: 0, signal: ac.signal }, "x");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await until(() => hub.offers().length === 1, "the offer");
+	ac.abort();
+	await pause(OFFER_ACK_MS + 50);
+	assert.equal(await outcome, "withdrawn");
+	// the player took it after all: its turn names it, and holds the next offer
+	hub.player({ t: "ack", id: 1, accepted: true });
+	const next = o.offer({ text: "two", quiet_ms: 0 }, "y");
+	hub.player({ t: "status", voice: "idle", epoch: 0 });
+	await pause(20);
+	assert.equal(hub.offers().length, 1);
+	const taken = o.take("one");
+	assert.equal(taken?.by, "x");
+	assert.equal(taken?.source, "game");
+	// one whose ack is lost with the link is found by its turn's text too
+	hub.player({ t: "status", voice: "speaking", epoch: 1 });
+	hub.player({ t: "status", voice: "idle", epoch: 2 });
+	await until(() => hub.offers().length === 2, "the next offer");
+	hub.player({ t: "ack", id: 2, accepted: true });
+	assert.equal(await next, "accepted");
+	const ac3 = new AbortController();
+	void o.offer({ text: "three", quiet_ms: 0, signal: ac3.signal }, "z");
+	hub.player({ t: "status", voice: "speaking", epoch: 3 });
+	hub.player({ t: "status", voice: "idle", epoch: 4 });
+	await until(() => hub.offers().length === 3, "the third offer");
+	ac3.abort();
+	hub.player("closed");
+	assert.equal(o.take("three")?.by, "z");
+	o.close();
+});
+
 test("a turn that names an offer whose ack never came settles it as taken", async () => {
 	const hub = fakeHub();
 	const o = new Offers(hub, () => {});
