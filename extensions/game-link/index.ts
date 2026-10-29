@@ -161,6 +161,7 @@ class Link {
 	context: string[] = [];
 	force: Force | null = null;
 	private pending = new Map<string, Sent>();
+	private answeredAll = new Set<() => void>(); // told whenever an action leaves `pending`
 	private said: string[] = []; // what games said out loud, waiting for a turn
 	private speaking = false;
 	private pressing = false;
@@ -194,11 +195,10 @@ class Link {
 
 	close() {
 		this.setForce(null);
-		for (const p of this.pending.values()) {
-			clearTimeout(p.timer);
+		for (const [id, p] of this.pending) {
+			this.forget(id);
 			p.answered?.({ error: "the game went away" });
 		}
-		this.pending.clear();
 		// not the close handshake, which a game that doesn't answer holds open for 30 s
 		for (const g of this.games.values()) g.ws.terminate();
 		this.games.clear();
@@ -223,8 +223,7 @@ class Link {
 	private abandon(which: (p: Sent) => boolean, why: string) {
 		for (const [id, p] of this.pending) {
 			if (!which(p)) continue;
-			this.pending.delete(id);
-			clearTimeout(p.timer);
+			this.forget(id);
 			this.note(`you did ${p.name}, and ${p.game} ${why}`);
 			p.answered?.({ error: `${p.game} ${why}` });
 		}
@@ -338,8 +337,7 @@ class Link {
 		const p = typeof data.id === "string" ? this.pending.get(data.id) : undefined;
 		// a result for an action that timed out, or was never sent, is dropped
 		if (!p) return;
-		this.pending.delete(data.id as string);
-		clearTimeout(p.timer);
+		this.forget(data.id as string);
 		const ok = data.success === true;
 		const message = typeof data.message === "string" ? clean(data.message).trim() : "";
 		const args = p.args && p.args !== "{}" ? ` ${p.args}` : "";
@@ -381,7 +379,7 @@ class Link {
 			name: call.name,
 			args,
 			timer: setTimeout(() => {
-				this.pending.delete(id);
+				this.forget(id);
 				this.note(`you did ${call.name}, and ${game.name} never answered`);
 				this.publish();
 			}, RESULT_MS),
@@ -400,6 +398,32 @@ class Link {
 				sent.answered = undefined;
 				done(r);
 			};
+		});
+	}
+
+	// An action is no longer waited on: answered, never to be, or given up.
+	private forget(id: string) {
+		const p = this.pending.get(id);
+		if (!p) return;
+		clearTimeout(p.timer);
+		this.pending.delete(id);
+		for (const fn of [...this.answeredAll]) fn();
+	}
+
+	// resolves once `game` has no action waiting for its answer (at most
+	// RESULT_MS), or at once when `stop` aborts
+	private answered(game: string, stop: AbortSignal): Promise<void> {
+		const busy = () => [...this.pending.values()].some((p) => p.game === game);
+		return new Promise((done) => {
+			if (!busy() || stop.aborted) return done();
+			const check = () => {
+				if (busy() && !stop.aborted) return;
+				this.answeredAll.delete(check);
+				stop.removeEventListener("abort", check);
+				done();
+			};
+			this.answeredAll.add(check);
+			stop.addEventListener("abort", check, { once: true });
 		});
 	}
 
@@ -465,6 +489,10 @@ class Link {
 		try {
 			while (this.force && !this.ctx.signal.aborted) {
 				const f = this.force;
+				// an action of its game still out may be the one that does the
+				// force, or fails it; a turn now could only be told to wait
+				await this.answered(f.game, AbortSignal.any([this.ctx.signal, f.over.signal]));
+				if (this.force !== f || this.ctx.signal.aborted) continue;
 				if (f.tries >= this.c.force_tries) {
 					this.ctx.log(`${f.game}: the character didn't act on its actions force in ${f.tries} turns; it was dropped`);
 					this.setForce(null);

@@ -555,3 +555,25 @@ test("a force names only the actions its game still has, and is over once anothe
 	assert.deepEqual(s.withdrawn, ["Game A: Your turn."]);
 	assert.ok(s.lines.some((l) => l.includes("Game A: its actions force was dropped")));
 });
+
+test("a force whose action is still out waits for the game's answer before it offers another turn", async (t) => {
+	const s = await served(t, () => "accepted");
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass] });
+	g.send("actions/force", { query: "Your turn.", action_names: ["pass"] });
+	await until(() => s.offers.length === 1, "the force's offer");
+	// the turn goes on without the game's answer
+	const ac = new AbortController();
+	const called = s.call("pass", "{}", ac.signal);
+	await until(() => g.got.some((m) => m.command === "action"), "the action");
+	ac.abort();
+	assert.deepEqual(await called, { pending: true });
+	s.setVoice("thinking");
+	s.setVoice("idle");
+	// well past the moment it gives the game after a turn
+	await new Promise((r) => setTimeout(r, 1800));
+	assert.equal(s.offers.length, 1);
+	g.send("action/result", { id: g.got.find((m) => m.command === "action")!.data!.id, success: false, message: "Not yet." });
+	await until(() => s.offers.length === 2, "the next try");
+	assert.equal(s.offers[1].text, "Test Game: that didn't work: Not yet.\nTest Game: Your turn.");
+});
