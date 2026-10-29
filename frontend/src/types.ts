@@ -93,6 +93,8 @@ export interface Transcript {
   source?: string;
   // a reply that called tools: what it adds to the history in place of `content`
   entries?: HistoryEntry[];
+  // how much of `content` the entries hold; the rest was said after them
+  covered?: number;
 }
 export interface Activity {
   time: number;

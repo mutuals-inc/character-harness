@@ -63,7 +63,7 @@ A turn where the chat model only called tools (see "Tools" in `architecture.md`)
 
 ### Tools in the history
 
-Each time the calls of a reply have run, the app gets `{t:"llm_calls", id, entries}`: the model's message that made them (what it said and its calls) and each call's result. The app adds them to what it keeps for the reply, in place of its text, so a reply that fails (`error`) or that the app cuts off afterwards still has them. A call still running when the app sends `cancel` has its `signal` aborted and is not sent.
+Each time the calls of a reply have run, the app gets `{t:"llm_calls", id, entries}`: the model's message that made them (what it said and its calls) and each call's result. The app adds them to what it keeps for the reply, in place of the text they hold, so a reply that fails (`error`) or that the app cuts off afterwards still has them. Text that streams after an `llm_calls` is not in its entries: if no `llm_done` comes, the app sends it in the history after them, as an `assistant` message, so the model knows it was said. A call still running when the app sends `cancel` has its `signal` aborted and is not sent.
 
 A reply that called tools ends with `{t:"llm_done", id, entries}`. `entries` is everything the reply adds to the history, in order, and replaces what `llm_calls` brought: each time the model was asked, what it said and the calls it made, then each call's result, and last what it said after them: `[acted]` when it said nothing, or `…` when it answered its silent reply.
 
