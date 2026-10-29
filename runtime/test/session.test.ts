@@ -1131,3 +1131,29 @@ test("a hook that writes the tools back with their keys in another order doesn't
 	assert.deepEqual(ran, ["kit"]);
 	await s.close();
 });
+
+test("calls and results before_llm cut apart are put back in pairs before the model gets them", async (t) => {
+	const past = [
+		{ role: "user", content: "use the key" },
+		{ role: "assistant", content: "Sure.", tool_calls: [call("a")] },
+		{ role: "tool", tool_call_id: "a", content: "used" },
+		{ role: "user", content: "and the map" },
+		{ role: "assistant", content: "", tool_calls: [call("b")] },
+		{ role: "tool", tool_call_id: "b", content: "unfolded" },
+		{ role: "user", content: "hi" },
+	];
+	const s = session(t, () => reply("ok"), [
+		// keeps the last five messages, so the first result loses its call, and
+		// it drops the second result
+		exts("window", { before_llm: ({ state }) => ({ state: { ...state, messages: state.messages!.slice(-5).filter((m) => m.tool_call_id !== "b") } }) }),
+	]);
+	s.app({ t: "llm", id: 5, history: past });
+	await until(() => s.logged("turn 5: replied"), "the reply");
+	assert.deepEqual((s.bodies[0].messages as unknown[]).slice(1), [
+		past[3],
+		{ role: "assistant", content: null, tool_calls: [{ id: "b", type: "function", function: { name: "use_item", arguments: "{}" } }] },
+		{ role: "tool", tool_call_id: "b", content: "No result." },
+		past[6],
+	]);
+	await s.close();
+});

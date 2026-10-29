@@ -129,8 +129,13 @@ function toMessages(history: unknown): Message[] {
 			ms.push(calls.length ? { role: "assistant", content: h.content, tool_calls: calls } : { role: "assistant", content: h.content });
 		} else if (h.role === "tool" && typeof h.tool_call_id === "string") ms.push({ role: "tool", content: h.content, tool_call_id: h.tool_call_id });
 	}
-	// The APIs want each call's result right after the message that made it,
-	// and no result without its call
+	return paired(ms);
+}
+
+// The APIs want each call's result right after the message that made it, and
+// no result without its call. The history is put this way when it arrives,
+// and again after before_llm, which may have cut or changed `messages`.
+function paired(ms: Message[]): Message[] {
 	const out: Message[] = [];
 	for (let i = 0; i < ms.length; i++) {
 		const m = ms[i];
@@ -563,7 +568,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				if (m.content.trim() === ACTED_TURN) return ms[i - 1]?.role === "tool" ? [] : [{ ...m, content: SILENT_TURN }];
 				return token && m.content.trim() === SILENT_TURN ? [{ ...m, content: token }] : [m];
 			});
-		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...asSaid(t.state.messages ?? [])];
+		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...asSaid(paired(t.state.messages ?? []))];
 		let quiet = false; // the last round answered the silent reply
 		let failure: string | null = null;
 		for (let round = 0; round < MAX_ROUNDS; round++) {
