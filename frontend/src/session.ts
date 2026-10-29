@@ -4,6 +4,7 @@ import { AudioOutput } from "./audio/output.ts";
 import { Microphone } from "./audio/input.ts";
 import type { WireMessage } from "./types.ts";
 import { speechRecording } from "./audio/recording.ts";
+import { unvoiced } from "./lib/markers.ts";
 
 export const output = new AudioOutput();
 export const microphone = new Microphone();
@@ -250,7 +251,7 @@ function collectSentences(final: boolean) {
   const chunks = remainder.split(/(?<=[.!?。！？])\s+(?![^\[]*\])/u);
   remainder = final ? "" : (chunks.pop() ?? "");
   for (const text of chunks)
-    if (text.trim() && text.trim() !== "…" && text.trim() !== "[acted]") sentences.push(text.trim());
+    if (text.trim() && !unvoiced(text)) sentences.push(text.trim());
   nextSentence();
 }
 

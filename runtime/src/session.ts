@@ -49,21 +49,12 @@ import { Heard } from "./utterances.ts";
 import { Tts } from "./tts.ts";
 import { Alignment } from "./align.ts";
 import { Leveler } from "./level.ts";
+import { ACTED_TURN, SILENT_TURN } from "./markers.ts";
 import { Offers, pendingResultText } from "./offers.ts";
 import type { LinkHub } from "./offers.ts";
 import type { AlignmentChunk } from "./align.ts";
 
 const PROTOCOL_VERSION = 1;
-
-// What a turn that makes no sound sends instead of nothing. The app waits ~12 s
-// on a turn with no text before calling the model dead, so a cancelled turn
-// sends this one character and `llm_done`. The app hands it back as a `tts`,
-// which is dropped without a sound.
-const SILENT_TURN = "…";
-// What a turn that only called tools sends instead, and the last of its
-// history entries. The app keeps it in the history like any reply, so a later
-// turn can tell it from a silent reply, and its `tts` gets no answer either.
-const ACTED_TURN = "[acted]";
 
 // How long a finished reply waits for more sentences before after_turn fires.
 // The app sends a sentence's `tts` as a playback slot frees up, so most of a
