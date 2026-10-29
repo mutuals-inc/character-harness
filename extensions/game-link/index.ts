@@ -121,6 +121,9 @@ const MAX_LINE = 2000;
 // the longest text an offer may have, as the runtime takes it
 const MAX_OFFER = 4000;
 
+// The runtime's own rules, written out here since extensions import nothing
+// from it: a tool's name and schema as toolProblem() in runtime/src/manifest.ts
+// takes them, and an offer's text as checkOffer() in runtime/src/offers.ts does.
 const ACTION_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
 // at most `n` characters, the ellipsis included, and never half a surrogate pair
 const cut = (s: string, n: number) => {
