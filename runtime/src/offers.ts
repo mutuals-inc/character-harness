@@ -21,11 +21,12 @@ export interface OfferRequest {
 	ttl_ms?: number; // how long it may wait for the voice to be free
 	quiet_ms?: number; // how long the voice must have been idle first
 	priority?: number; // higher goes first; then the oldest
+	signal?: AbortSignal; // withdraws the offer when aborted, unless the player has taken it
 }
 
 // accepted: the player took it as a turn. expired: its ttl ran out first.
-// closed: the session ended first.
-export type OfferOutcome = "accepted" | "expired" | "closed";
+// withdrawn: its `signal` was aborted first. closed: the session ended first.
+export type OfferOutcome = "accepted" | "expired" | "withdrawn" | "closed";
 
 export const OFFER_TTL_MS = 10_000;
 export const OFFER_QUIET_MS = 2000;
@@ -126,12 +127,13 @@ export interface Accepted {
 }
 
 interface Pending {
-	req: Required<Omit<OfferRequest, "source">> & { source: string };
+	req: Required<Omit<OfferRequest, "source" | "signal">> & { source: string };
 	by: string;
 	at: number;
 	done: (o: OfferOutcome) => void;
 	ids: number[]; // every id it went out under: a late ack names an old one
 	epoch: number; // the epoch it last went out with
+	withdrawn?: boolean; // withdrawn while the player had it: unless it takes it, it is over
 }
 
 // control characters other than a newline or a tab
@@ -159,6 +161,7 @@ export function checkOffer(req: OfferRequest): void {
 	if (req.source !== undefined && (typeof req.source !== "string" || !/^[a-z][a-z0-9_-]*$/.test(req.source)))
 		throw new Error("an offer's `source` is a lowercase word, like chat or screen");
 	if (req.priority !== undefined && !Number.isFinite(req.priority)) throw new Error("an offer's `priority` must be a number");
+	if (req.signal !== undefined && !(req.signal instanceof AbortSignal)) throw new Error("an offer's `signal` must be an AbortSignal");
 	for (const k of ["ttl_ms", "quiet_ms"] as const) {
 		const v = req[k];
 		if (v !== undefined && (typeof v !== "number" || !(v >= 0 && v <= OFFER_WAIT_MAX_MS)))
@@ -201,8 +204,15 @@ export class Offers {
 	offer(req: OfferRequest, by: string): Promise<OfferOutcome> {
 		checkOffer(req);
 		if (this.closed) return Promise.resolve("closed");
-		return new Promise((done) => {
-			this.queue.push({
+		if (req.signal?.aborted) return Promise.resolve("withdrawn");
+		return new Promise((resolve) => {
+			const signal = req.signal;
+			const done = (o: OfferOutcome) => {
+				signal?.removeEventListener("abort", withdraw);
+				resolve(o);
+			};
+			const withdraw = () => this.withdraw(p);
+			const p: Pending = {
 				req: {
 					text: req.text.trim(),
 					source: req.source ?? "offer",
@@ -215,7 +225,9 @@ export class Offers {
 				done,
 				ids: [],
 				epoch: 0,
-			});
+			};
+			signal?.addEventListener("abort", withdraw, { once: true });
+			this.queue.push(p);
 			this.pump();
 		});
 	}
@@ -233,6 +245,21 @@ export class Offers {
 		if (!waiting) return undefined;
 		this.settle(waiting);
 		return this.accepted.pop();
+	}
+
+	// An offer still in the queue leaves it. One the player has may still be
+	// taken; if it is refused or never answered, it is over.
+	private withdraw(p: Pending): void {
+		if (this.closed) return;
+		const i = this.queue.indexOf(p);
+		if (i >= 0) {
+			this.queue.splice(i, 1);
+			this.log(`[offers] ${p.by}: withdrew "${p.req.text.slice(0, 60)}"`);
+			p.done("withdrawn");
+			this.pump();
+		} else if (p === this.inFlight) {
+			p.withdrawn = true;
+		}
 	}
 
 	close(): void {
@@ -318,9 +345,12 @@ export class Offers {
 
 	private requeue(): void {
 		clearTimeout(this.ackTimer);
-		if (!this.inFlight) return;
-		this.queue.push(this.inFlight);
+		const p = this.inFlight;
+		if (!p) return;
 		this.inFlight = null;
+		if (!p.withdrawn) return void this.queue.push(p);
+		this.log(`[offers] ${p.by}: withdrew "${p.req.text.slice(0, 60)}"`);
+		p.done("withdrawn");
 	}
 
 	// Hands the best offer that may go now to the player, and sets a timer for

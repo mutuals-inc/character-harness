@@ -155,10 +155,11 @@ const outcome = await offer({ text: "@ana asked in chat: what's your favorite so
 | `quiet_ms` | `2000` | how long the voice must have been idle before the offer goes out, so the character doesn't take the floor the moment it stops. At most a day |
 | `ttl_ms` | `10000` | how long the offer may wait. Past it, the offer resolves `expired`. At most a day |
 | `priority` | `0` | higher goes first; among equals, the oldest |
+| `signal` | none | an `AbortSignal` that withdraws the offer when aborted, for one that no longer makes sense, like a question the service has since replaced. One the player is already deciding on may still be taken |
 
 The runtime keeps a queue per session and hands one offer at a time to the player, only while its voice is idle. After the player takes one, nothing else goes out until that turn has started, or the voice has stayed idle for 5 s more. If the player refuses one because someone just started speaking, it goes back in the queue and waits for the next quiet moment. A taken offer is an ordinary turn. The player sends it back as the user's line, and its `input` has `channel` set to the offer's `source` and `offered_by` set to the extension's name.
 
-`offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
+`offer` resolves `accepted` when the player takes it, `expired` when its `ttl_ms` ran out first, `withdrawn` when its `signal` was aborted first, and `closed` when the session ended first. A service paces itself on that. For example, after `accepted` it can wait out a cooldown before it offers again.
 
 `examples/extensions/dead-air` is the smallest service: it offers one line once the voice has been quiet for a while.
 
