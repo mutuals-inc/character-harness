@@ -51,6 +51,8 @@ The `memory` and `reactions` extensions, if a character uses them, need `TYPESAF
 
 `npm test` runs the tests; they need no keys or network.
 
+To let the character play a game built with [neuro-sdk](https://github.com/VedalAI/neuro-sdk), add `extensions/game-link` to its `extensions:`, start the runtime and player, then start the game with `NEURO_SDK_WS_URL=ws://127.0.0.1:8000`. See `extensions/game-link/README.md`.
+
 ## Local web studio (draft)
 
 The optional [frontend](frontend/README.md) puts the animated character, text and
