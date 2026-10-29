@@ -81,7 +81,7 @@ test(
     const metadata = await get("/api/bootstrap", "GET", { Cookie: cookie });
     assert.equal(metadata.status, 200);
     const body = JSON.parse(metadata.body);
-    assert.equal(body.hooks.length, 8);
+    assert.equal(body.hooks.length, 9);
     assert.ok(
       body.character.keys.every(
         (key: object) => Object.keys(key).sort().join(",") === "name,ready",
