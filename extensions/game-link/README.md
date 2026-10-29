@@ -56,7 +56,7 @@ A game that leaves, or whose connection fails (a frame over 1 MB, or one that is
 
 Control characters in what a game sends are taken out, and any line break becomes a newline, so its text always makes a valid offer. A forced turn is known by the offer's text, matched whatever happened to its whitespace on the way back from the player.
 
-What a game sends goes into the prompt, framed as the game's description and not as instructions. It is still text from another program; only connect games you trust.
+What a game sends goes into the prompt between `<game>` tags, framed as the game's description and not as instructions. Any `<game>` or `</game>` in its text is taken out, again until none is left, so a tag hidden in another can't close the block. It is still text from another program; only connect games you trust.
 
 ## What it doesn't do yet
 

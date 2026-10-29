@@ -127,8 +127,12 @@ const cut = (s: string, n: number) => {
 	const end = /[\ud800-\udbff]/.test(s[n - 2]) ? n - 2 : n - 1;
 	return `${s.slice(0, end)}…`;
 };
-// game text goes in the prompt between <game> tags; it can't close them
-const plain = (s: string) => s.replace(/<\/?game>/gi, "");
+// game text goes in the prompt between <game> tags; it can't close them, even
+// with a tag hidden in another ("<</game>/game>")
+const plain = (s: string): string => {
+	const out = s.replace(/<\/?game>/gi, "");
+	return out === s ? out : plain(out);
+};
 // game text without the control characters an offer refuses: any line break
 // is a newline, and the rest go
 const clean = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
