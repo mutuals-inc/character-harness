@@ -1116,3 +1116,18 @@ test("a turn a newer one cuts off while its calls run hands after_turn the calls
 	assert.deepEqual(seen[0], { turn: 5, calls: [{ ...call("c"), by: "kit", result: "Started. The result will come later." }] });
 	await s.close();
 });
+
+test("a hook that writes the tools back with their keys in another order doesn't take them over", async (t) => {
+	const ran: string[] = [];
+	const sorted = (v: unknown): unknown =>
+		Array.isArray(v) ? v.map(sorted) : v && typeof v === "object" ? Object.fromEntries(Object.entries(v).sort(([a], [b]) => (a < b ? 1 : -1)).map(([k, x]) => [k, sorted(x)])) : v;
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]), [
+		exts("kit", { on_tool_call: () => { ran.push("kit"); } }, [{ ...useItem, by: "kit" }]),
+		// like a hook in Go, which decodes the state into maps and encodes it again
+		exts("gopher", { before_llm: ({ state }) => ({ state: sorted(state) as typeof state }), on_tool_call: () => { ran.push("gopher"); } }),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(ran, ["kit"]);
+	await s.close();
+});

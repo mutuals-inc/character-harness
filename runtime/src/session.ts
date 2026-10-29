@@ -171,16 +171,27 @@ function toTools(tools: unknown, warn: (line: string) => void): { tool: Tool; by
 	return out;
 }
 
+// `v` with every object's keys in order, so two values that differ only in
+// that order write the same JSON. Arrays keep theirs: it means something.
+function sortedKeys(v: unknown): unknown {
+	if (Array.isArray(v)) return v.map(sortedKeys);
+	if (!v || typeof v !== "object") return v;
+	const o = v as Record<string, unknown>;
+	return Object.fromEntries(Object.keys(o).sort().map((k) => [k, sortedKeys(o[k])]));
+}
+
 // Marks each tool in `s.tools` with the extension that added it: a tool `prev`
 // already had, unchanged, keeps its owner, and any other is `by`'s, whatever
 // `by` it came with. So an extension can't hand its calls to another one.
 function claimTools(prev: unknown, s: State, by: string): State {
 	if (!Array.isArray(s.tools)) return s;
-	// a tool is the same one when everything but its `by` is
+	// a tool is the same one when everything but its `by` is, whatever order
+	// its keys are in: a hook that decodes and encodes the state again (a Go
+	// map, say) may sort them
 	const key = (t: Tool) => {
 		const { by: _, ...rest } = t;
 		try {
-			return JSON.stringify(rest);
+			return JSON.stringify(sortedKeys(rest));
 		} catch {
 			return ""; // matches nothing, so it is `by`'s
 		}
