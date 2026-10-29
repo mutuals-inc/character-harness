@@ -7,7 +7,8 @@
 //     bin   PCM16 16 kHz mic frames
 //   runtime -> app
 //     text  {t:"mode",text,v} | {t:"stt_partial"|"stt_final",text,utterance?}
-//           {t:"llm_delta",id,text} | {t:"llm_done",id} | {t:"tts_done",id}
+//           {t:"llm_delta",id,text} | {t:"llm_calls",id,entries}
+//           {t:"llm_done",id,entries?} | {t:"tts_done",id}
 //           {t:"beat",id,bt,emotion,talk,gesture,camera} | {t:"emotion",id,emotion}
 //           {t:"error",id,text}
 //     bin   [id:u8][PCM16 24 kHz]  TTS audio, tagged so concurrent sentences demux
@@ -39,7 +40,7 @@ import { printable } from "./check.ts";
 import { hasHook, runHook, runTool } from "./extensions.ts";
 import type { Loaded, ServiceContext } from "./extensions.ts";
 import { LlmHttpError, LlmStreamError, streamChat } from "./llm.ts";
-import { ELEVENLABS_KEY, TOOL_NAME } from "./manifest.ts";
+import { ELEVENLABS_KEY, toolProblem } from "./manifest.ts";
 import type { Character } from "./manifest.ts";
 import { STATE_SCHEMA } from "./state.ts";
 import type { Beat, Message, State, Timing, Tool, ToolCall, ToolChoice, ToolResult } from "./state.ts";
@@ -59,9 +60,9 @@ const PROTOCOL_VERSION = 1;
 // sends this one character and `llm_done`. The app hands it back as a `tts`,
 // which is dropped without a sound.
 const SILENT_TURN = "…";
-// What a turn that only called tools sends instead. The app keeps it in the
-// history like any reply, so a later turn can tell it from a silent reply,
-// and its `tts` gets no answer either.
+// What a turn that only called tools sends instead, and the last of its
+// history entries. The app keeps it in the history like any reply, so a later
+// turn can tell it from a silent reply, and its `tts` gets no answer either.
 const ACTED_TURN = "[acted]";
 
 // How long a finished reply waits for more sentences before after_turn fires.
@@ -144,21 +145,18 @@ function toMessages(history: unknown): Message[] {
 	return out;
 }
 
-// The tools of a turn, as the model gets them: each a name the APIs take and an
-// object schema, and each name once, the first one listed. `warn` is told what
-// was left out. Each comes with the extension that added it.
+// The tools of a turn, as the model gets them: each one toolProblem passes,
+// and each name once, the first one listed. `warn` is told what was left out.
+// Each keeps `by`, the extension the runtime marked as having added it.
 function toTools(tools: unknown, warn: (line: string) => void): { tool: Tool; by?: string }[] {
 	if (!Array.isArray(tools)) return [];
 	const out: { tool: Tool; by?: string }[] = [];
 	for (const t of tools) {
-		const name = (t as Tool | null)?.name;
-		if (typeof name !== "string" || !TOOL_NAME.test(name)) {
-			warn(`a tool without a usable name was left out: ${JSON.stringify(name ?? null)}`);
-			continue;
-		}
-		const { description, parameters, by } = t as Tool;
-		if (parameters !== undefined && (typeof parameters !== "object" || parameters === null || parameters.type !== "object")) {
-			warn(`tool ${name} was left out: its parameters must be a schema of type "object"`);
+		if (!t || typeof t !== "object") continue;
+		const { name, description, parameters, by } = t as Tool;
+		const problem = toolProblem(t as Tool);
+		if (problem) {
+			warn(`tool ${JSON.stringify(name ?? null)} was left out: its ${problem[0]} ${problem[1]}`);
 			continue;
 		}
 		if (out.some((o) => o.tool.name === name)) {
@@ -171,13 +169,42 @@ function toTools(tools: unknown, warn: (line: string) => void): { tool: Tool; by
 	return out;
 }
 
+// Marks each tool in `s.tools` with the extension that added it: a tool `prev`
+// already had, unchanged, keeps its owner, and any other is `by`'s, whatever
+// `by` it came with. So an extension can't hand its calls to another one.
+function claimTools(prev: unknown, s: State, by: string): State {
+	if (!Array.isArray(s.tools)) return s;
+	// a tool is the same one when everything but its `by` is
+	const key = (t: Tool) => {
+		const { by: _, ...rest } = t;
+		try {
+			return JSON.stringify(rest);
+		} catch {
+			return ""; // matches nothing, so it is `by`'s
+		}
+	};
+	const isTool = (t: unknown): t is Tool => typeof t === "object" && t !== null;
+	const owners = new Map<string, string[]>();
+	for (const t of Array.isArray(prev) ? prev : []) {
+		const k = isTool(t) ? key(t) : "";
+		if (k && typeof t.by === "string") owners.set(k, [...(owners.get(k) ?? []), t.by]);
+	}
+	const tools = s.tools.map((t) => (isTool(t) ? { ...t, by: owners.get(key(t))?.shift() ?? by } : t));
+	return { ...s, tools };
+}
+
 const resultText = (r: ToolResult | undefined) =>
 	r === undefined ? DONE_RESULT : "content" in r ? r.content : "error" in r ? `Error: ${r.error}` : PENDING_RESULT;
 
-function toChoice(c: unknown): ToolChoice | undefined {
+// The turn's tool_choice. One naming a tool the model isn't sent would have
+// the request refused, so it falls back to the default, and `warn` is told.
+function toChoice(c: unknown, tools: Tool[], warn: (line: string) => void): ToolChoice | undefined {
 	if (c === "auto" || c === "required" || c === "none") return c;
 	const name = (c as { name?: unknown } | null)?.name;
-	return typeof name === "string" ? { name } : undefined;
+	if (typeof name !== "string") return undefined;
+	if (tools.some((t) => t.name === name)) return { name };
+	warn(`tool_choice names ${JSON.stringify(name)}, which isn't one of the turn's tools; the model may call any`);
+	return undefined;
 }
 
 // One sentence while it is spoken: its voice timing so far, and the beats
@@ -432,6 +459,10 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			idle: undefined,
 		};
 		turn = t;
+		// what this turn adds to the conversation when it calls tools: each
+		// round's text and calls, their results, and the last round's text
+		const entries: Message[] = [];
+		const calls: ToolCall[] = [];
 		const finish = (how: string) => {
 			// the app may have reused the id for a newer reply
 			if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -442,7 +473,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const silent = () => {
 			t.state.cancel = true;
 			send({ t: "llm_delta", id, text: SILENT_TURN });
-			send({ t: "llm_done", id });
+			send(entries.length ? { t: "llm_done", id, entries } : { t: "llm_done", id });
 			finish("cancelled, nothing spoken");
 		};
 
@@ -455,13 +486,14 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const beforeLlm = t.state.ext;
 		// every tool is marked with the extension that added it, so its calls
 		// go to that one's on_tool_call
-		const mark = (s: State, by: string): State =>
-			Array.isArray(s.tools)
-				? { ...s, tools: s.tools.map((tool) => (tool && typeof tool === "object" && typeof tool.by !== "string" ? { ...tool, by } : tool)) }
-				: s;
 		const declared = exts.flatMap((e) => e.tools ?? []);
 		if (declared.length) t.state.tools = structuredClone(declared);
-		const prepared = await runHook(exts, "before_llm", t.state, log, (s, e) => mark(s, e.name));
+		let owned: unknown = t.state.tools;
+		const prepared = await runHook(exts, "before_llm", t.state, log, (s, e) => {
+			const claimed = claimTools(owned, s, e.name);
+			owned = claimed.tools;
+			return claimed;
+		});
 		t.state = { ...prepared, ext: applyExt(t.state.ext, extChanges(beforeLlm, prepared.ext)) };
 		if (closed) return;
 		if (cancelledByApp.has(ac)) return finish("cut off by the app");
@@ -493,30 +525,28 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 
 		const kept = toTools(t.state.tools, warnOnce);
 		const tools = kept.map((k) => k.tool);
-		const choice = toChoice(t.state.tool_choice);
+		const choice = toChoice(t.state.tool_choice, tools, warnOnce);
 		const runCall = async (c: ToolCall): Promise<ToolResult | undefined> => {
 			const owner = c.by ? exts.find((e) => e.name === c.by) : undefined;
 			if (!owner) return { error: `there is no tool named ${c.name}` };
 			if (!owner.hooks.has("on_tool_call")) {
 				warnOnce(`extension ${owner.name} offers tools but has no on_tool_call hook to run them`);
-				return undefined;
+				return { error: "the tool can't be run" };
 			}
 			return runTool(owner, c, t.state, ac.signal, log);
 		};
 		const apiKey = process.env[character.chat.api_key_env] ?? "";
-		// the app keeps a silent reply as `…`; the model wrote it as the token.
-		// A reply that only called tools said nothing, which the model reads as `…`.
-		const asSaid = (m: Message): Message => {
-			if (m.role !== "assistant" || m.tool_calls) return m;
-			if (m.content.trim() === ACTED_TURN) return { ...m, content: SILENT_TURN };
-			return token && m.content.trim() === SILENT_TURN ? { ...m, content: token } : m;
-		};
-		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...(t.state.messages ?? []).map(asSaid)];
-		// what this turn adds to the conversation when it calls tools: each
-		// round's text and calls, their results, and the last round's text
-		const entries: Message[] = [];
-		const calls: ToolCall[] = [];
-		let written = ""; // everything the model wrote, the silent reply too
+		// The app keeps a silent reply as `…`; the model wrote it as the token. A
+		// reply that only acted ends with `[acted]`: after its calls' results it
+		// is dropped, so the model reads what it did and nothing it chose not to
+		// say; from an app that kept no calls, it reads as `…`, not the token.
+		const asSaid = (ms: Message[]): Message[] =>
+			ms.flatMap((m, i) => {
+				if (m.role !== "assistant" || m.tool_calls) return [m];
+				if (m.content.trim() === ACTED_TURN) return ms[i - 1]?.role === "tool" ? [] : [{ ...m, content: SILENT_TURN }];
+				return token && m.content.trim() === SILENT_TURN ? [{ ...m, content: token }] : [m];
+			});
+		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...asSaid(t.state.messages ?? [])];
 		let quiet = false; // the last round answered the silent reply
 		let failure: string | null = null;
 		for (let round = 0; round < MAX_ROUNDS; round++) {
@@ -552,7 +582,6 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 						continue;
 					}
 					text += piece;
-					written += piece;
 					// the model said nothing, and may still be calling a tool
 					if (quiet) {
 						tail += piece.length;
@@ -585,8 +614,11 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			} finally {
 				ac.signal.removeEventListener("abort", stop);
 			}
-			if (failure || closed || ac.signal.aborted || !made.length) {
-				if (calls.length) entries.push({ role: "assistant", content: quiet || !spoken.trim() ? SILENT_TURN : spoken.trimStart() });
+			// no call runs until before_reply has let the reply through, so a turn
+			// it cancels has done nothing
+			const go = !failure && made.length > 0 && !(await replyCancelled);
+			if (!go || closed || ac.signal.aborted) {
+				if (calls.length) entries.push({ role: "assistant", content: quiet ? SILENT_TURN : spoken.trim() ? spoken.trimStart() : ACTED_TURN });
 				break;
 			}
 			// every call goes to the extension whose tool it is, all at once
@@ -600,12 +632,16 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			const asked: Message = { role: "assistant", content: quiet ? "" : spoken.trimStart(), tool_calls: made.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) };
 			const answers = made.map((c, i): Message => ({ role: "tool", tool_call_id: c.id, content: resultText(results[i]) }));
 			for (const [i, c] of made.entries()) calls.push({ ...c, result: answers[i].content });
+			// the calls ran, so however the turn ends, after_turn sees them and the
+			// app keeps them, unless it has cut the turn off and expects nothing more
+			t.state.tool_calls = calls;
+			if (!closed && !cancelledByApp.has(ac)) send({ t: "llm_calls", id, entries: [asked, ...answers] });
 			request.push(asked, ...answers);
 			entries.push(asked, ...answers);
 			// the model is asked again when there is a result or an error to read
 			const read = results.some((r) => r !== undefined && !("pending" in r));
 			if (closed || ac.signal.aborted || !read || last) {
-				entries.push({ role: "assistant", content: SILENT_TURN });
+				entries.push({ role: "assistant", content: ACTED_TURN });
 				break;
 			}
 		}
@@ -617,9 +653,9 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// a barge-in: the app tore the turn down and expects nothing more for it
 		if (cancelledByApp.has(ac)) return finish("cut off by the app");
 		if (cancelled) return silent();
-		t.state.reply = written;
-		// the calls ran, so a turn that failed after them still has them
-		if (calls.length) t.state.tool_calls = calls;
+		// what the app was sent, every round's; a reply that said nothing because
+		// the model answered the silent reply is the token
+		t.state.reply = said.trim() ? said.trimStart() : quiet ? token : "";
 		if (failure) {
 			t.state.error = failure;
 			send({ t: "error", id, text: failure });

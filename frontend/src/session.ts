@@ -195,8 +195,12 @@ function handleMessage(event: MessageEvent) {
     remainder += message.text ?? "";
     changed();
     collectSentences(false);
+  } else if (message.t === "llm_calls" && message.id === replyId) {
+    // calls that ran are kept even if the reply is cut off or fails later
+    const reply = state.messages.at(-1)!;
+    reply.entries = [...(reply.entries ?? []), ...(message.entries ?? [])];
   } else if (message.t === "llm_done" && message.id === replyId) {
-    // a reply that called tools keeps its calls and their results
+    // a reply that called tools keeps its calls, their results and what it said after
     if (message.entries?.length) state.messages.at(-1)!.entries = message.entries;
     collectSentences(true);
     replyId = null;
@@ -274,7 +278,7 @@ export async function submit(
   cancelReply();
   state.messages.push({ role: "user", content: text.trim(), source });
   const history = state.messages
-    .filter((m) => m.content.trim())
+    .filter((m) => m.content.trim() || m.entries?.length)
     .flatMap(({ role, content, entries }) => entries ?? [{ role, content }]);
   state.messages.push({ role: "assistant", content: "" });
   replyId = ++sequence;

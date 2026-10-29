@@ -119,7 +119,7 @@ models:
 
 - The runtime sends `prompt` as the system message, then `messages`. It streams the answer into sentences for `on_sentence` and writes the full text to `reply`.
 - On failure the runtime sets `error` and ends the turn. `after_turn` still fires.
-- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is what had arrived when the model was stopped. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
+- With `silent_reply` set, a reply that starts with it, after any leading whitespace, is silent, even if text follows. The runtime holds the start of each reply until it can tell, stops the model as soon as it sees the token, and ends the turn like a cancelled one: `cancel` is `true` and `reply` is the token, without anything the model wrote after it. Unlike a cancelled turn, `after_llm` still fires, so a logger sees the model chose silence.
 - The runtime never tells the model about `silent_reply`. The character's prompt says when to answer it. The app keeps a silent reply in the history as `…`, and the runtime turns it back into the token before the model sees it. That includes turns an extension cancelled, so the model sees those as its own silent replies too.
 
 ## Tools
@@ -133,14 +133,16 @@ An extension can give the chat model functions to call, so the character acts in
 An extension lists the tools it always offers under `tools` in its `extension.yaml`, or adds them to `state.tools` on `before_llm` when they change from turn to turn. Either way it runs them on `on_tool_call` (see "Tools" in `extensions.md`).
 
 - The runtime sends the turn's tools with the request, in the shape of the character's `api`. A turn with no tools sends none. A tool whose name isn't 1 to 64 letters, digits, `_` or `-`, or whose `parameters` isn't a schema of type `object`, is left out, and so is a second tool with a name already listed. Tool names are shared by every extension, so pick names unlikely to collide.
-- `state.tool_choice` says whether the model must call one: `auto` (the default), `required`, `none`, or `{ "name": "use_item" }` for that one. It applies to the turn's first request only.
-- The runtime marks each tool with `by`, the extension that added it, and sends each call to that extension's `on_tool_call`, all of a reply's calls at once. A call to a tool nobody offered gets an error.
+- `state.tool_choice` says whether the model must call one: `auto` (the default), `required`, `none`, or `{ "name": "use_item" }` for that one. It applies to the turn's first request only. One that names a tool the turn doesn't send (left out, or never added) is logged and dropped, so the model may call any.
+- The runtime marks each tool with `by`, the extension that added it, and sends each call to that extension's `on_tool_call`, all of a reply's calls at once. `by` is the runtime's: a tool an extension adds or changes on `before_llm` is that extension's, whatever `by` it wrote, and one it passes on unchanged keeps its owner. A call to a tool nobody offered gets an error, and so does one whose extension has no `on_tool_call`.
+- No call runs until `before_reply` has let the reply through. A model that calls a tool before then waits, and a turn `before_reply` cancels runs none of its calls.
 - A call's result is what the model reads next. When any call of a reply has a result or an error, the runtime asks the model again in the same turn, with its calls and their results, and what it writes then goes on in the same reply. A turn asks the model at most 4 times, and the last time it may call nothing. A call whose tool answered nothing (it is done and has nothing to report), or `pending` (its result comes later), asks nothing more by itself.
 - A result that comes later comes in a turn of its own: the extension's service offers it with `ctx.result` (see "Services" in `extensions.md`).
-- Speaking first and then calling a lookup is how the character fills the wait: what it said plays while the tool runs. When the app cuts the turn off, the tools' `signal` is aborted.
-- `state.tool_calls` has every call the turn made, on `after_llm` and after: `[{id, name, arguments, by, result}]`, with `arguments` the JSON text as the model wrote it and `result` what the model got back.
-- The history keeps the calls and their results (see "Tools in the history" in `protocol.md`), so the model remembers what it did on later turns.
-- A reply that only calls tools says nothing: the app gets `[acted]` as its text, and doesn't voice it. `cancel` stays unset, since the character did answer. With tools offered, a model that answers its `silent_reply` is not stopped at the token, so it can still call a tool. Its text after the token is not sent, and the runtime stops it once it has written 200 more characters.
+- Speaking first and then calling a lookup is how the character fills the wait: what it said plays while the tool runs. A tool's `signal` is aborted when the app cuts the turn off and when the tool runs out of time, so a tool the model was told failed can stop before it acts.
+- `state.tool_calls` has every call that ran, from `after_llm` on: `[{id, name, arguments, by, result}]`, with `arguments` the JSON text as the model wrote it and `result` what the model got back. However the turn ends after its calls ran, cut off by the app or failed, `after_turn` still sees them.
+- `reply` is what the app was sent, every time the model was asked, with a space between them. It never has text the app wasn't sent.
+- The history keeps the calls and their results (see "Tools in the history" in `protocol.md`), so the model remembers what it did on later turns. The app gets each reply's calls and results as soon as they ran, so it keeps them even when the turn then fails.
+- A reply that only calls tools says nothing: the app gets `[acted]` as its text, and doesn't voice it. `cancel` stays unset, since the character did answer. The model reads such a reply as its calls and their results, with nothing after them, never as its `silent_reply`. With tools offered, a model that answers its `silent_reply` is not stopped at the token, so it can still call a tool. Its text after the token is not sent, and the runtime stops it once it has written 200 more characters.
 - A turn cancelled or cut off before its calls run runs none of them.
 
 ## The voice
@@ -189,8 +191,8 @@ Every event carries one JSON state object. Extensions receive it, may change it,
 | `prompt` | the system prompt being built |
 | `tools` | functions the chat model may call this turn: the ones extensions declare, and any `before_llm` adds (see "Tools") |
 | `tool_choice` | whether the model must call a tool this turn, set on `before_llm` |
-| `reply` | the full reply, once written |
-| `tool_calls` | the calls the chat model made and what they gave back, on `after_llm` |
+| `reply` | the full reply as the app got it, once written; the `silent_reply` token when the model answered it and said nothing |
+| `tool_calls` | the calls the chat model made that ran, and what they gave back, from `after_llm` on |
 | `turn` | the turn's number, the same for every hook of one turn |
 | `sentence` | the current sentence, inside `on_sentence` and `on_speak` |
 | `beats` | inside `on_sentence`: cues an extension adds for this sentence (see "Beats") |

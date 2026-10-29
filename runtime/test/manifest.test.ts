@@ -190,4 +190,9 @@ test("an extension's tools are read with it, and need a blocking on_tool_call to
 		() => loadCharacter(withExtension("name: kit\nhandler: index.ts\nhooks: [on_tool_call]\ntools:\n  - name: a\n  - name: a\n")),
 		/lists a twice/,
 	);
+	// the same check as a tool before_llm adds
+	assert.throws(
+		() => loadCharacter(withExtension("name: kit\nhandler: index.ts\nhooks: [on_tool_call]\ntools:\n  - name: a\n    parameters: { type: array }\n")),
+		/`tools\[0\].parameters` must be a schema of type "object"/,
+	);
 });

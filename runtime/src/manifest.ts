@@ -320,8 +320,17 @@ function readHooks(file: string, ext: Obj, service: boolean): Map<HookName, Hook
 	return hooks;
 }
 
-// A tool name the chat APIs take
-export const TOOL_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
+// What makes a tool unusable, as the key at fault and why, or undefined when
+// the chat APIs take it: a name of 1 to 64 letters, digits, _ or -, and
+// parameters, when given, a schema of type "object". The manifest and the
+// tools before_llm adds are checked the same way.
+export function toolProblem(t: { name?: unknown; parameters?: unknown }): [key: string, why: string] | undefined {
+	if (typeof t.name !== "string" || !/^[a-zA-Z0-9_-]{1,64}$/.test(t.name)) return ["name", "must be 1 to 64 letters, digits, _ or -"];
+	const p = t.parameters;
+	if (p !== undefined && (typeof p !== "object" || p === null || Array.isArray(p) || (p as Obj).type !== "object"))
+		return ["parameters", 'must be a schema of type "object"'];
+	return undefined;
+}
 
 function readTools(file: string, raw: unknown, name: string, hooks: Map<HookName, HookOptions>): Tool[] {
 	if (raw === undefined || raw === null) return [];
@@ -332,13 +341,11 @@ function readTools(file: string, raw: unknown, name: string, hooks: Map<HookName
 		const at = `tools[${i}]`;
 		if (!isObj(t)) throw new ManifestError(`${file}: \`${at}\` must be a mapping`);
 		const tool = field(file, t, at, "name").str();
-		if (!TOOL_NAME.test(tool))
-			throw new ManifestError(`${file}: \`${at}.name\` must be 1 to 64 letters, digits, _ or -`);
 		const description = field(file, t, at, "description").optStr();
-		const parameters = t.parameters === undefined || t.parameters === null ? undefined : field(file, t, at, "parameters").obj();
-		if (parameters && parameters.type !== "object")
-			throw new ManifestError(`${file}: \`${at}.parameters\` must be a schema of type "object"`);
-		return { name: tool, ...(description !== undefined ? { description } : {}), ...(parameters ? { parameters } : {}), by: name };
+		const parameters = t.parameters === null ? undefined : t.parameters;
+		const problem = toolProblem({ name: tool, parameters });
+		if (problem) throw new ManifestError(`${file}: \`${at}.${problem[0]}\` ${problem[1]}`);
+		return { name: tool, ...(description !== undefined ? { description } : {}), ...(parameters ? { parameters: parameters as Obj } : {}), by: name };
 	});
 	const names = tools.map((t) => t.name);
 	const twice = names.find((n, i) => names.indexOf(n) !== i);
