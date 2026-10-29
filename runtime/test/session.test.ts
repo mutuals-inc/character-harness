@@ -1026,7 +1026,10 @@ test("a tool whose extension has no on_tool_call gives the model an error, not D
 	s.app({ t: "llm", id: 5, history });
 	await until(() => s.logged("turn 5: replied"), "the reply");
 	assert.equal((s.bodies[1].messages as { content: string }[]).at(-1)!.content, "Error: the tool can't be run");
-	assert.ok(s.logged("extension kit offers tools but has no on_tool_call hook to run them"));
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: replied"), "the second reply");
+	// runTool says so, once a session
+	assert.equal(s.lines.filter((l) => l.includes("kit offers use_item but has no on_tool_call hook to run it")).length, 1);
 	await s.close();
 });
 

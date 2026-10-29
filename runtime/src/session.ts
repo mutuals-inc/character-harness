@@ -487,7 +487,8 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const silent = () => {
 			t.state.cancel = true;
 			send({ t: "llm_delta", id, text: SILENT_TURN });
-			send(entries.length ? { t: "llm_done", id, entries } : { t: "llm_done", id });
+			// it ran no call: before_llm cancelled before any, or before_reply did
+			send({ t: "llm_done", id });
 			finish("cancelled, nothing spoken");
 		};
 
@@ -543,11 +544,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		const runCall = async (c: ToolCall): Promise<ToolResult | undefined> => {
 			const owner = c.by ? exts.find((e) => e.name === c.by) : undefined;
 			if (!owner) return { error: `there is no tool named ${c.name}` };
-			if (!owner.hooks.has("on_tool_call")) {
-				warnOnce(`extension ${owner.name} offers tools but has no on_tool_call hook to run them`);
-				return { error: "the tool can't be run" };
-			}
-			return runTool(owner, c, t.state, ac.signal, log);
+			return runTool(owner, c, t.state, ac.signal, log, warnOnce);
 		};
 		const apiKey = process.env[character.chat.api_key_env] ?? "";
 		// The app keeps a silent reply as `…`; the model wrote it as the token. A

@@ -178,16 +178,18 @@ function toResult(r: unknown): ToolResult | undefined {
 // handler that throws or runs out of time gives the model an error instead.
 // The handler's `signal` is aborted when the turn is cut off and when it runs
 // out of time, so a tool the model was told failed can stop what it started.
+// `warn` hears a mistake in the extension itself, which a session says once.
 export async function runTool(
 	e: Loaded,
 	call: ToolCall,
 	state: State,
 	signal: AbortSignal,
 	log: (line: string) => void,
+	warn: (line: string) => void = log,
 ): Promise<ToolResult | undefined> {
 	const opts = e.hooks.get("on_tool_call");
 	if (!opts) {
-		log(`[ext] ${e.name} offers ${call.name} but has no on_tool_call hook to run it`);
+		warn(`[ext] ${e.name} offers ${call.name} but has no on_tool_call hook to run it`);
 		return { error: "the tool can't be run" };
 	}
 	const late = new AbortController();
