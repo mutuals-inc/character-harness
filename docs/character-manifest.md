@@ -66,6 +66,8 @@ env_file: ../../.env
 | `name` | yes | Display name. |
 | `description` | yes | One line on who the character is. |
 | `purpose` | no | What the character is for. |
+| `portrait` | no | Local PNG/JPEG/WebP image used by the browser character library, relative to this folder. |
+| `created_at` | no | Creation timestamp recorded by the browser editor for library sorting. |
 | `author` | yes | Who made the character. |
 | `license` | yes | What people may do with the character itself (fan art, revenue, brand deals). Separate from the code license. |
 | `prompt` | yes | The personality, as one markdown file. |
@@ -160,3 +162,18 @@ A list, in the order the extensions run. Each extension declares its own hooks a
 | Key | Required | What |
 |---|---|---|
 | `env_file` | yes | Path to the `.env` file. At startup the runtime checks it has every key the character needs: `models.chat.api_key_env`, `ELEVENLABS_API_KEY` for speech to text and the voice, and each extension's `requires_env`. |
+
+## Browser authoring metadata
+
+The browser editor saves disabled extension entries under `disabled_extensions`,
+with the same path/config shape as `extensions`. The runtime runs only the
+`extensions` list. This keeps enable/disable choices and configurations local to
+each character without changing shared extension code.
+
+The editor also saves `extension_order`, a list of extension registry IDs, to
+preserve the displayed order across enabled and disabled entries. Runtime
+execution still follows the enabled `extensions` list.
+
+The library sorts existing characters without `created_at` by their local folder
+creation time. Creating a new character writes an explicit timestamp. Uploaded
+models, portraits and animations are stored in the new character's own folder.

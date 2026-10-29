@@ -1,3 +1,4 @@
+description: Plans expressive gestures, emotions and camera cues for each reply.
 name: director
 handler: index.ts
 hooks:

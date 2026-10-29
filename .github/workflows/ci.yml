@@ -21,3 +21,6 @@ jobs:
       - run: npm run typecheck
       - run: npm test
       - run: node --test scripts/*.test.mjs
+      - run: npm --prefix frontend ci
+      - run: npm --prefix frontend run build
+      - run: npm --prefix frontend test

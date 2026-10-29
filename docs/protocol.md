@@ -30,10 +30,11 @@ So one turn is: speech in (`stt_*`), one `llm` request, then a `tts` request per
 | `{t:"stt_partial", text, utterance?}` | the transcript so far |
 | `{t:"stt_final", text, utterance?}` | the transcript of a finished utterance |
 | `{t:"llm_delta", id, text}` | the next piece of the reply |
-| `{t:"llm_calls", id, entries}` | tools the reply called have run: the calls and their results, to keep in the history even if the reply then fails or is cut off (see "Tools in the history") |
+| `{t:"llm_calls", id, entries}` | a tool the reply called has run: the call and its result, to keep in the history even if the reply then fails or is cut off (see "Tools in the history") |
 | `{t:"llm_done", id, entries?}` | the reply is complete. A reply that called tools also has `entries`, everything it adds to the history (see "Tools in the history") |
 | binary: `[id: u8][PCM16, 24 kHz, mono]` | voice audio for a sentence, streamed as it is synthesized. The first byte is the low byte of the sentence's `id`, so sentences in flight together need ids that differ in their low byte |
 | `{t:"tts_done", id}` | all audio for sentence `id` has been sent |
+| `{t:"tts_alignment", id, alignment}` | incremental character timestamps for sentence `id`. `alignment` contains `characters`, `character_start_times_seconds` and `character_end_times_seconds`. Times are relative to that sentence's audio, not message arrival. Studio uses them for readable captions synchronized to playback; clients without captions can ignore the message |
 | `{t:"beat", id, bt, emotion, talk, gesture, camera}` | staging for sentence `id`, starting `bt` seconds into its audio: the face's emotion, the body's talking style (`talk`), a one-shot gesture and a camera move. An empty field changes nothing; `none` means none |
 | `{t:"emotion", id, emotion}` | an emotion that applies at once, at the start of sentence `id` |
 | `{t:"error", id, text}` | a request failed (see below) |

@@ -6,6 +6,7 @@ export class AudioOutput {
   private starts = new Map<number, number>();
   private nodes = new Set<AudioBufferSourceNode>();
   private data = new Uint8Array(256);
+  private deviceId = "";
 
   async ready(volume: number, device = "") {
     this.context ??= new AudioContext({ sampleRate: 24000 });
@@ -16,7 +17,7 @@ export class AudioOutput {
       this.analyser.connect(this.gain).connect(this.context.destination);
     }
     this.volume(volume);
-    if (device) await this.device(device);
+    if (device || this.deviceId) await this.device(device);
     await this.context.resume();
   }
 
@@ -29,6 +30,7 @@ export class AudioOutput {
         "Output selection is unavailable in this browser. Use your system output setting.",
       );
     await context?.setSinkId?.(id);
+    this.deviceId = id;
   }
 
   volume(value: number) {
@@ -65,6 +67,11 @@ export class AudioOutput {
       : null;
   }
 
+  position(id:number):number|null {
+    const start=this.starts.get(id);
+    return this.context && start!==undefined ? this.context.currentTime-start : null;
+  }
+
   level(): number {
     if (!this.analyser) return 0;
     this.analyser.getByteTimeDomainData(this.data);
@@ -93,6 +100,7 @@ export class AudioOutput {
     this.context = null;
     this.gain = null;
     this.analyser = null;
+    this.deviceId = "";
   }
   async test(volume: number, device = "") {
     await this.ready(volume, device);

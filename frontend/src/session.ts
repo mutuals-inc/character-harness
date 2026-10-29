@@ -2,13 +2,16 @@ import { state, record, status } from "./store.ts";
 import { request, toast } from "./lib/dom.ts";
 import { AudioOutput } from "./audio/output.ts";
 import { Microphone } from "./audio/input.ts";
+import { Captions } from './audio/captions.ts';
 import type { WireMessage } from "./types.ts";
-import { speechRecording } from "./audio/recording.ts";
 import { historyOf } from "./lib/history.ts";
 import { unvoiced } from "./lib/markers.ts";
+import { withStudioCue, withStudioHook } from "./lib/studio-live.ts";
 
 export const output = new AudioOutput();
 export const microphone = new Microphone();
+const captions = new Captions();
+export function currentCaption(){return captions.text(id=>output.position(id));}
 let socket: WebSocket | null = null;
 let sequence = 0;
 let replyId: number | null = null;
@@ -21,44 +24,18 @@ let resolveStart: (() => void) | null = null;
 let rejectStart: ((reason: Error) => void) | null = null;
 let startupTimer: ReturnType<typeof setTimeout> | null = null;
 let lastHookSequence = 0;
-let recordingCleanup: (() => Promise<void>) | null = null;
-
-export async function sendRecording(file: File) {
-  if (!state.connected) await startSession();
-  await recordingCleanup?.();
-  const recording = await speechRecording(file);
-  recordingCleanup = recording.dispose;
-  try {
-    await microphone.start(
-      state.settings,
-      send,
-      () => {
-        cancelReply();
-        status("Listening to recording…");
-      },
-      recording.stream,
-    );
-    state.muted = false;
-    status("Listening to recording…");
-    record("input", "Speech recording started", file.name);
-    await recording.start(() => {
-      void microphone.stop().finally(() => {
-        state.muted = true;
-        void recording.dispose();
-        recordingCleanup = null;
-        status("Recording finished");
-      });
-    });
-  } catch (error) {
-    await recording.dispose();
-    recordingCleanup = null;
-    throw error;
-  }
-}
-
-function hookEvent(message: WireMessage) {
+function hookEvent(
+  message: WireMessage,
+  characterId = state.bootstrap?.character.id,
+) {
+  if (characterId !== state.bootstrap?.character.id) return;
   if (message.seq && message.seq <= lastHookSequence) return;
   lastHookSequence = message.seq ?? lastHookSequence;
+  const live = withStudioHook(state.live, message);
+  if (live !== state.live) {
+    state.live = live;
+    document.dispatchEvent(new CustomEvent("studio-live"));
+  }
   if (message.phase !== "start")
     record(
       "hook",
@@ -69,13 +46,14 @@ function hookEvent(message: WireMessage) {
     );
 }
 
-async function collectClosingHooks() {
+async function collectClosingHooks(characterId: string) {
   for (let attempt = 0; attempt < 5; attempt++) {
     await new Promise((resolve) => setTimeout(resolve, 400));
+    if (state.bootstrap?.character.id !== characterId) return;
     try {
       (
         await request<WireMessage[]>(`/api/events?after=${lastHookSequence}`)
-      ).forEach(hookEvent);
+      ).forEach((message) => hookEvent(message, characterId));
     } catch {
       return;
     }
@@ -90,6 +68,8 @@ function changed() {
   document.dispatchEvent(new CustomEvent("transcript"));
 }
 function cue(message: WireMessage) {
+  state.live = withStudioCue(state.live, message);
+  document.dispatchEvent(new CustomEvent("studio-live"));
   document.dispatchEvent(new CustomEvent("stage-cue", { detail: message }));
 }
 function scheduleCues(id: number) {
@@ -118,6 +98,7 @@ export async function startSession(): Promise<void> {
   if (microphone.running) {
     await microphone.stop();
     state.muted = true;
+    state.micMode = "off";
   }
   try {
     await output.ready(state.settings.volume, state.settings.outputDevice);
@@ -128,8 +109,8 @@ export async function startSession(): Promise<void> {
   }
   const params = new URLSearchParams({
     character: state.bootstrap!.character.id,
-    disabled: state.settings.disabledExtensions.join(","),
   });
+  const characterId = state.bootstrap!.character.id;
   return new Promise<void>((resolve, reject) => {
     resolveStart = resolve;
     rejectStart = reject;
@@ -139,7 +120,9 @@ export async function startSession(): Promise<void> {
       rejectStart?.(new Error("The session took too long to connect."));
       endSession();
     }, 15000);
-    socket.onmessage = handleMessage;
+    socket.onmessage = (event) => {
+      if (state.bootstrap?.character.id === characterId) handleMessage(event);
+    };
     socket.onerror = () => {
       toast("Could not connect to the local runtime.", true);
     };
@@ -149,11 +132,13 @@ export async function startSession(): Promise<void> {
       state.connected = false;
       state.connecting = false;
       state.muted = true;
+      state.micMode = "off";
+      state.live.partialTranscript = "";
       void microphone.stop();
       cancelReply(false);
       status("Session ended");
       record("session", "Session ended");
-      void collectClosingHooks();
+      void collectClosingHooks(characterId);
       socket = null;
     };
   });
@@ -190,6 +175,8 @@ function handleMessage(event: MessageEvent) {
     );
     resolveStart?.();
     resetStartup();
+  } else if (message.t === 'tts_alignment' && message.id!==undefined && message.alignment) {
+    captions.push(message.id,message.alignment);
   } else if (message.t === "studio_hook") {
     hookEvent(message);
   } else if (message.t === "llm_delta" && message.id === replyId) {
@@ -231,8 +218,10 @@ function handleMessage(event: MessageEvent) {
       message.t === "beat" ? `${message.bt ?? 0}s into speech` : "Expression",
     );
   } else if (message.t === "stt_partial") {
+    state.live.partialTranscript = message.text ?? "";
     status(message.text || "Listening…");
   } else if (message.t === "stt_final" && message.text?.trim()) {
+    state.live.partialTranscript = "";
     void submit(message.text, "voice").catch((error) =>
       toast(error.message, true),
     );
@@ -307,11 +296,16 @@ export function cancelReply(notify = true) {
     );
   if (notify) {
     if (replyId !== null) send({ t: "cancel", id: replyId });
-    if (speechId !== null) send({ t: "cancel", id: speechId });
   }
   replyId = null;
-  speechId = null;
   remainder = "";
+  stopCharacterSpeech(notify);
+}
+
+export function stopCharacterSpeech(notify = true) {
+  captions.clear();
+  if (notify && speechId !== null) send({ t: "cancel", id: speechId });
+  speechId = null;
   sentences.length = 0;
   cues.clear();
   timers.forEach(clearTimeout);
@@ -320,40 +314,53 @@ export function cancelReply(notify = true) {
 }
 
 export async function toggleMicrophone(testOnly = false) {
-  await recordingCleanup?.();
-  recordingCleanup = null;
-  if (microphone.running) {
-    await microphone.stop();
-    send({ t: "stt_reset" });
-    state.muted = true;
-    status("Microphone off");
-    return;
+  if (state.micPending) return;
+  state.micPending = true;
+  document.dispatchEvent(new CustomEvent("session-state"));
+  try {
+    if (microphone.running) {
+      await microphone.stop();
+      send({ t: "stt_reset" });
+      state.muted = true;
+      state.micMode = "off";
+      state.live.partialTranscript = "";
+      status("Microphone off");
+      return;
+    }
+    if (!testOnly && !state.connected) await startSession();
+    await microphone.start(
+      state.settings,
+      testOnly ? () => {} : send,
+      testOnly
+        ? () => {}
+        : () => {
+            cancelReply();
+            status("Listening…");
+          },
+      undefined,
+      () => {
+        if (!testOnly) status("Transcribing…");
+      },
+    );
+    state.muted = false;
+    state.micMode = testOnly ? "test" : "live";
+    status(
+      testOnly
+        ? "Testing microphone · audio stays on this device"
+        : "Microphone on",
+    );
+  } finally {
+    state.micPending = false;
+    document.dispatchEvent(new CustomEvent("session-state"));
   }
-  if (!testOnly && !state.connected) await startSession();
-  await microphone.start(
-    state.settings,
-    testOnly ? () => {} : send,
-    testOnly
-      ? () => {}
-      : () => {
-          cancelReply();
-          status("Listening…");
-        },
-  );
-  state.muted = false;
-  status(
-    testOnly
-      ? "Testing microphone · audio stays on this device"
-      : "Microphone on",
-  );
 }
 
 export function endSession() {
-  void recordingCleanup?.();
-  recordingCleanup = null;
   cancelReply();
   void microphone.stop();
   state.muted = true;
+  state.micMode = "off";
+  state.live.partialTranscript = "";
   socket?.close();
   state.connected = false;
   state.connecting = false;
