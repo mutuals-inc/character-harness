@@ -51,6 +51,7 @@ interface Action {
 type Priority = "low" | "medium" | "high" | "critical";
 
 interface Force {
+	id: string;
 	game: string;
 	query: string;
 	state?: string;
@@ -70,7 +71,7 @@ interface Seen {
 	games: { name: string; actions: Action[] }[];
 	context: string[];
 	// `offered`: the text of the force's last offer, so a hook can tell its turn
-	force: { game: string; query: string; state?: string; names: string[]; offered?: string } | null;
+	force: { id: string; game: string; query: string; state?: string; names: string[]; offered?: string } | null;
 }
 
 interface ToolCall {
@@ -321,6 +322,7 @@ class Link {
 		if (this.force) this.ctx.log(`${game.name}: a new actions force replaced the one from ${this.force.game}`);
 		const priority = (["low", "medium", "high", "critical"] as const).find((p) => p === data.priority) ?? "low";
 		this.setForce({
+			id: randomUUID(),
 			game: game.name,
 			query,
 			...(state ? { state } : {}),
@@ -432,10 +434,11 @@ class Link {
 	}
 
 	// A force whose actions are all other extensions' tools can't be done: the
-	// character never sees them.
-	unwinnable() {
+	// character never sees them. `id` is the force the hook saw, which a newer
+	// one may have replaced since; that one stays.
+	unwinnable(id: string) {
 		const f = this.force;
-		if (!f) return;
+		if (f?.id !== id) return;
 		this.ctx.log(`${f.game}: every action its force names (${f.names.join(", ")}) has the name of another extension's tool, so the force was dropped`);
 		this.setForce(null);
 		this.publish();
@@ -462,7 +465,7 @@ class Link {
 			games: [...this.games.values()].map((g) => ({ name: g.name, actions: [...g.actions.values()] })),
 			context: this.context,
 			force: f
-				? { game: f.game, query: plain(f.query), ...(f.state ? { state: plain(f.state) } : {}), names: f.names, ...(f.offered ? { offered: f.offered } : {}) }
+				? { id: f.id, game: f.game, query: plain(f.query), ...(f.state ? { state: plain(f.state) } : {}), names: f.names, ...(f.offered ? { offered: f.offered } : {}) }
 				: null,
 		};
 		this.ctx.ext.set(seen);
@@ -657,7 +660,7 @@ export default function ({ event, state, call, signal }: { event: string; state:
 	// matched whatever happened to its whitespace on the way
 	let forced = state.input?.offered_by === NAME && !!seen.force?.offered && same(state.input?.text ?? "", seen.force.offered);
 	if (forced && !offerable.some((a) => seen.force!.names.includes(a.name))) {
-		links.get(state.session.id)?.unwinnable();
+		links.get(state.session.id)?.unwinnable(seen.force!.id);
 		forced = false;
 	}
 	const tools = offerable.filter((a) => !forced || seen.force!.names.includes(a.name)).map(toolOf);

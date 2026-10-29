@@ -577,3 +577,22 @@ test("a force whose action is still out waits for the game's answer before it of
 	await until(() => s.offers.length === 2, "the next try");
 	assert.equal(s.offers[1].text, "Test Game: that didn't work: Not yet.\nTest Game: Your turn.");
 });
+
+test("a force found unwinnable on its turn drops only itself, not a newer force", async (t) => {
+	const s = await served(t, () => "accepted");
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass, useItem] });
+	g.send("actions/force", { query: "Pick a card.", action_names: ["pass"] });
+	await until(() => s.offers.length === 1, "the first force's offer");
+	// the turn's state has the first force; a new one comes before before_llm
+	const before = s.ext();
+	g.send("actions/force", { query: "Pick a target.", action_names: ["use_item"] });
+	await until(() => s.offers.length === 2, "the new force's offer");
+	link({
+		event: "before_llm",
+		state: { session: s.session, ext: { "game-link": before }, input: { text: "Test Game: Pick a card.", offered_by: "game-link" }, tools: [{ name: "pass" }] },
+	} as never);
+	await new Promise((r) => setTimeout(r, 20));
+	assert.equal((s.ext().force as { query: string } | null)?.query, "Pick a target.");
+	assert.equal(s.lines.some((l) => l.includes("so the force was dropped")), false);
+});
