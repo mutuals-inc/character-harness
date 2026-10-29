@@ -98,6 +98,8 @@ interface Turn {
 	firstSentence: boolean; // its first `tts` has not arrived yet
 	closed: boolean;
 	idle: ReturnType<typeof setTimeout> | undefined;
+	// the calls running now; after_turn waits for them, so it sees each one that ran
+	running?: Promise<unknown>;
 }
 
 // what a call with no result in the history gets, since the APIs want one
@@ -337,6 +339,10 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		t.closed = true;
 		clearTimeout(t.idle);
 		ext = t.state.ext;
+		// A turn cut off while its calls run (a newer `llm`, the socket closing)
+		// still hands after_turn what they did. Tools write no `ext`, and each
+		// has its timeout, so this waits only so long.
+		await t.running?.catch(() => {});
 		const before = t.state.ext;
 		const s = await runHook(exts, "after_turn", t.state, log);
 		const changes = extChanges(before, s.ext);
@@ -628,13 +634,18 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				const by = kept.find((k) => k.tool.name === c.name)?.by;
 				if (by) c.by = by;
 			}
-			const results = await Promise.all(made.map(runCall));
+			// The calls ran, so however the turn ends, after_turn sees them: they are
+			// in its state before anything waiting on them goes on.
+			const running = Promise.all(made.map(runCall)).then((results) => {
+				for (const [i, c] of made.entries()) calls.push({ ...c, result: resultText(results[i]) });
+				t.state.tool_calls = calls;
+				return results;
+			});
+			t.running = running;
+			const results = await running;
 			const asked: Message = { role: "assistant", content: quiet ? "" : spoken.trimStart(), tool_calls: made.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) };
 			const answers = made.map((c, i): Message => ({ role: "tool", tool_call_id: c.id, content: resultText(results[i]) }));
-			for (const [i, c] of made.entries()) calls.push({ ...c, result: answers[i].content });
-			// the calls ran, so however the turn ends, after_turn sees them and the
-			// app keeps them, unless it has cut the turn off and expects nothing more
-			t.state.tool_calls = calls;
+			// the app keeps them too, unless it has cut the turn off and expects nothing more
 			if (!closed && !cancelledByApp.has(ac)) send({ t: "llm_calls", id, entries: [asked, ...answers] });
 			request.push(asked, ...answers);
 			entries.push(asked, ...answers);

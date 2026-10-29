@@ -1090,3 +1090,29 @@ test("runTool on an extension without on_tool_call is an error, not Done", async
 	assert.deepEqual(r, { error: "the tool can't be run" });
 	assert.ok(lines[0].includes("kit offers use_item but has no on_tool_call hook"));
 });
+
+test("a turn a newer one cuts off while its calls run hands after_turn the calls once they ran", async (t) => {
+	const held = gate();
+	const seen: { turn?: number; calls?: unknown }[] = [];
+	const s = session(t, (n) => (n === 0 ? sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]) : reply("ok")), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }),
+			on_tool_call: async () => {
+				await held.shut;
+				return { result: { pending: true } };
+			},
+			after_turn: ({ state }) => { seen.push({ turn: state.turn, calls: state.tool_calls }); },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.calls.length === 1, "the model to be asked");
+	await new Promise((r) => setTimeout(r, 20));
+	// a newer `llm`, with no cancel first: turn 5 is closed while its tool runs
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: replied"), "the newer reply");
+	assert.equal(seen.length, 0);
+	held.open();
+	await until(() => seen.length === 1, "turn 5's after_turn");
+	assert.deepEqual(seen[0], { turn: 5, calls: [{ ...call("c"), by: "kit", result: "Started. The result will come later." }] });
+	await s.close();
+});
