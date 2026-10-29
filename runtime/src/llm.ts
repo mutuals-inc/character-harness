@@ -133,11 +133,14 @@ function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done
 		for (const p of d?.tool_calls ?? []) {
 			// A piece goes on the call its index names, or without an index the last
 			// one. One that brings an id other than that call's starts a new call:
-			// some servers send every parallel call at index 0.
+			// some servers send every parallel call at index 0. So does one that
+			// brings an id and a name when that call has no id, a name and whole
+			// arguments: a call's id comes with its first piece.
 			const index = typeof p.index === "number" ? p.index : undefined;
 			let i = index !== undefined ? at.get(index) : calls.length - 1;
 			const was = i !== undefined && i >= 0 ? calls[i] : undefined;
-			if (!was || (p.id && was.id && p.id !== was.id)) {
+			const another = !!p.id && !!was && (was.id ? p.id !== was.id : !!was.name && !!p.function?.name && isWhole(was.arguments));
+			if (!was || another) {
 				i = calls.push({ id: "", name: "", arguments: "" }) - 1;
 				if (index !== undefined) at.set(index, i);
 			}

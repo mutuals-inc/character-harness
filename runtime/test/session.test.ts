@@ -1242,3 +1242,19 @@ test("a stream stopped partway still hands over its last call when it was whole,
 	assert.deepEqual(await read(), [call("a", '{"item":"key"}')]);
 	assert.deepEqual(await read(), []);
 });
+
+test("parallel calls at one index stay apart when the first has no id", async (t) => {
+	const { exts: list, ran } = acting([useItem]);
+	const s = session(
+		t,
+		(n) =>
+			n === 0
+				? sse([piece(0, { name: "use_item", arguments: '{"item":"key"}' }), piece(0, { name: "use_item", arguments: '{"item":"map"}' }, "b")])
+				: noText(),
+		list,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item, use_item"), "the turn");
+	assert.deepEqual(ran, [{ ...call("call_5_0_0", '{"item":"key"}'), by: "kit" }, { ...call("b", '{"item":"map"}'), by: "kit" }]);
+	await s.close();
+});
