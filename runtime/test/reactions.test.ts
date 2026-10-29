@@ -9,6 +9,7 @@ import { afterEach, test } from "node:test";
 import { parse } from "yaml";
 import reactions, { check, decide, judgement, kept, resolve, strength, type Answer, type Judgement } from "../../extensions/reactions/index.ts";
 import { bodyOf } from "../src/check.ts";
+import { ACTED_TURN } from "../src/markers.ts";
 import { runHook, type Loaded } from "../src/extensions.ts";
 import { loadCharacter, type HookOptions } from "../src/manifest.ts";
 import type { HookName, State } from "../src/state.ts";
@@ -396,3 +397,26 @@ test("the check refuses a config it can't use and warns about words the characte
 function near(a: number | undefined, b: number, tolerance = 0.01) {
 	assert.ok(a !== undefined && Math.abs(a - b) <= tolerance, `${a} is not within ${tolerance} of ${b}`);
 }
+
+test("the judge reads what was said, not calls, their results or a reply that only acted", async () => {
+	process.env[KEY] = "secret";
+	const calls = judge({ answers: answers() });
+	const messages = [
+		{ role: "user", content: "play something" },
+		{ role: "assistant", content: "", tool_calls: [{ id: "c", name: "play_song", arguments: "{}" }] },
+		{ role: "tool", tool_call_id: "c", content: "Done." },
+		{ role: "assistant", content: ACTED_TURN },
+		{ role: "user", content: "nice" },
+		{ role: "assistant", content: "Here's another.", tool_calls: [{ id: "d", name: "play_song", arguments: "{}" }] },
+		{ role: "tool", tool_call_id: "d", content: "Done." },
+		{ role: "assistant", content: ` ${ACTED_TURN} ` },
+		{ role: "user", content: "I finally finished my first song!" },
+	];
+	await reactions({ event: "before_reply", state: state(newSession(), 1, { messages: messages as State["messages"] }), config: config() });
+	const body = JSON.parse(String(calls[0].init.body));
+	assert.deepEqual(body.state.conversation, [
+		{ role: "user", content: "play something" },
+		{ role: "user", content: "nice" },
+		{ role: "assistant", content: "Here's another." },
+	]);
+});

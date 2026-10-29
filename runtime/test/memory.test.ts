@@ -12,6 +12,7 @@ import { spans } from "../../extensions/memory/ask.ts";
 import { ask } from "../../extensions/memory/jev.ts";
 import { MAX_DEPTH, evict, loadStore, saveStore, validate, type Memory, type Store } from "../../extensions/memory/store.ts";
 import { loadCharacter } from "../src/manifest.ts";
+import { ACTED_TURN } from "../src/markers.ts";
 
 const KEY_ENV = "MEMORY_TEST_JEV_KEY";
 process.env[KEY_ENV] = "not-a-real-key";
@@ -567,4 +568,26 @@ test("an answer too big, or an error that echoes the key, is reported without it
 		assert.doesNotMatch(e.message, /not-a-real-key/);
 		return true;
 	});
+});
+
+test("the conversation Jev reads is what was said, not calls, their results or a reply that only acted", async () => {
+	const dir = tempDir();
+	const seen = fakeJev(answers({}));
+	const text = "My best friend is moving to japan";
+	const state = {
+		...stateFor(text),
+		messages: [
+			{ role: "user", content: "play something" },
+			{ role: "assistant", content: "", tool_calls: [{ id: "c", name: "play_song", arguments: "{}" }] },
+			{ role: "tool", tool_call_id: "c", content: "Done." },
+			{ role: "assistant", content: ACTED_TURN },
+			{ role: "assistant", content: "Enjoy it." },
+			{ role: "user", content: text },
+		],
+	};
+	await memory({ event: "before_llm", state, config: config(dir) });
+	assert.deepEqual(seen[0].body.state.conversation, [
+		{ role: "user", content: "play something" },
+		{ role: "assistant", content: "Enjoy it." },
+	]);
 });

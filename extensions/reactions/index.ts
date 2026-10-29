@@ -226,12 +226,22 @@ function questions(c: Resolved, name: string): Record<string, Question> {
 	return out;
 }
 
+// What the runtime puts in place of a reply that only called tools
+// (ACTED_TURN in runtime/src/markers.ts). Extensions import nothing from the
+// runtime, so it is written out here too.
+const ACTED_TURN = "[acted]";
+
+// Whether an assistant message is something the character said: a message that
+// only carried tool calls says nothing, and neither does `[acted]`.
+const said = (role: unknown, content: string) => role === "assistant" && content.trim() !== "" && content.trim() !== ACTED_TURN;
+
 // What the judge reads: who the character is, the conversation so far, and
 // the message.
 function situation(state: Input["state"], c: Resolved) {
 	const ch = state.character ?? {};
-	// tool calls and results are not the conversation the judge reads
-	const messages = (state.messages ?? []).filter((m) => m && typeof m.content === "string" && (m.role === "user" || m.role === "assistant"));
+	// what the judge reads is what was said: not the calls and their results,
+	// nor a reply that only acted
+	const messages = (state.messages ?? []).filter((m) => m && typeof m.content === "string" && (m.role === "user" || said(m.role, m.content)));
 	// the conversation ends with the user's message, which is `message`
 	const earlier = messages.at(-1)?.role === "user" ? messages.slice(0, -1) : messages;
 	return {
