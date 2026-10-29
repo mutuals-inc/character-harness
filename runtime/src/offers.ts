@@ -137,6 +137,25 @@ interface Pending {
 // control characters other than a newline or a tab
 const CONTROL = /[\u0000-\u0008\u000b-\u001f\u007f]/;
 
+// The text of the turn that hands the model a pending call's result. A result
+// a tool hands back at once goes to the model as it is; this one goes to the
+// player as an offer, so it is made to fit one rather than refused: a `\r`
+// becomes a newline, any other control character a space, and a result too
+// long for an offer is cut short, saying so.
+export function pendingResultText(name: string, content: string): string {
+	const head = `The result of ${name}: `;
+	const clean = String(content)
+		.replace(/\r\n?/g, "\n")
+		.replace(new RegExp(CONTROL.source, "g"), " ");
+	const cut = " … (cut short)";
+	const room = OFFER_TEXT_MAX - head.length;
+	if (clean.length <= room) return head + clean;
+	let end = Math.max(0, room - cut.length);
+	// not between the two halves of a character outside the BMP, like an emoji
+	if (end > 0 && /[\uD800-\uDBFF]/.test(clean[end - 1])) end--;
+	return head + clean.slice(0, end) + cut;
+}
+
 export function checkOffer(req: OfferRequest): void {
 	if (!req || typeof req.text !== "string" || !req.text.trim()) throw new Error("an offer needs some `text`");
 	if (req.text.length > OFFER_TEXT_MAX) throw new Error(`an offer's text is at most ${OFFER_TEXT_MAX} characters`);

@@ -54,7 +54,7 @@ What it sends is bounded: the message is cut to 4000 characters, each earlier me
 | `personal` | yes/no | is it about the character rather than the user's own life, someone else or a topic |
 | `gesture` | choice | which of the character's `gestures` fits, or `still` |
 
-The judge sees the character's name, description and `about`, the last few messages and the user's message. The questions name the character: asked about "the character", the judge mixed the character up with the user and rated "i got the job" as being about the character. Its rubrics only describe; every threshold is in the code, since questions asked together influence each other.
+The judge sees the character's name, description and `about`, the last few messages and the user's message. Those are what was said: tool calls, their results and the `[acted]` of a reply that only called tools are left out. The questions name the character: asked about "the character", the judge mixed the character up with the user and rated "i got the job" as being about the character. Its rubrics only describe; every threshold is in the code, since questions asked together influence each other.
 
 ## How it picks
 

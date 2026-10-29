@@ -213,8 +213,8 @@ character unchanged. The authored animation lives in
 original four-second salute at 30 Hz. Only the skeleton metadata is reused from
 the wave clip.
 
-`examples/extensions/comet-cues/` is an independent example that subscribes to all
-eight hooks and stages the salute once when the input contains “comet salute”.
+`examples/extensions/comet-cues/` is an independent example that subscribes to every
+hook but `on_tool_call`, since it offers no tools, and stages the salute once when the input contains “comet salute”.
 Disable it, end the session, and start another to compare behavior. Enable it
 again and use Studio's microphone for the speech pipeline. Studio's Audio setup
 microphone test is local only; a live session sends detected speech to the

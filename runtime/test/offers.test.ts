@@ -9,7 +9,7 @@ import { test, type TestContext } from "node:test";
 import WebSocket from "ws";
 import type { HookInput, Loaded, ServiceContext } from "../src/extensions.ts";
 import type { Character } from "../src/manifest.ts";
-import { LinkServer, Offers, OFFER_ACK_MS, type LinkHub } from "../src/offers.ts";
+import { LinkServer, Offers, OFFER_ACK_MS, OFFER_TEXT_MAX, pendingResultText, type LinkHub } from "../src/offers.ts";
 import { runSession } from "../src/session.ts";
 import type { HookName, State } from "../src/state.ts";
 
@@ -441,4 +441,48 @@ test("a service reads what its own hook wrote on the turn still open, and a run 
 	assert.deepEqual(ctx!.ext.get(), { seen: "hey" });
 	release();
 	await s.close();
+});
+
+test("a pending call's result is made to fit an offer, and a bad request rejects rather than throws", async (t) => {
+	const long = pendingResultText("play_song", "x".repeat(5000));
+	assert.equal(long.length, OFFER_TEXT_MAX);
+	assert.ok(long.startsWith("The result of play_song: xxx"));
+	assert.ok(long.endsWith("… (cut short)"));
+	assert.equal(pendingResultText("play_song", "a\r\nb\rc\u0000d\te"), "The result of play_song: a\nb\nc d\te");
+	assert.equal(pendingResultText("play_song", "ok"), "The result of play_song: ok");
+
+	let ctx: ServiceContext | undefined;
+	const s = session(t, [
+		extension("kit", {
+			service: async (c) => {
+				ctx = c;
+				await new Promise((r) => c.signal.addEventListener("abort", r));
+			},
+		}),
+	]);
+	await until(() => ctx !== undefined, "the service");
+	const call = { id: "c", name: "play_song", arguments: "{}" };
+	// a result too long or with a \r still goes out as an offer
+	s.hub.player({ t: "status", voice: "idle", epoch: 0 });
+	const sent = ctx!.result(call, "y".repeat(4500) + "\r", { quiet_ms: 0 });
+	await until(() => s.hub.offers().length === 1, "the offer");
+	assert.equal((s.hub.offers()[0].text as string).length, OFFER_TEXT_MAX);
+	s.hub.player({ t: "ack", id: 1, accepted: true });
+	assert.equal(await sent, "accepted");
+	// a request that isn't a valid offer is a rejected promise
+	let returned: Promise<unknown> | undefined;
+	assert.doesNotThrow(() => { returned = ctx!.result(call, "ok", { ttl_ms: -1 }); });
+	await assert.rejects(returned!, /ttl_ms/);
+	await s.close();
+});
+
+test("a long pending result is cut between characters, not inside an emoji", () => {
+	const head = "The result of play_song: ";
+	const cut = " … (cut short)";
+	// the cut falls right after the first half of an emoji
+	const before = OFFER_TEXT_MAX - head.length - cut.length - 1;
+	const text = pendingResultText("play_song", "x".repeat(before) + "🎵".repeat(1000));
+	assert.ok(text.endsWith(`x${cut}`));
+	assert.equal(/[\uD800-\uDBFF](?![\uDC00-\uDFFF])/.test(text), false);
+	assert.ok(text.length <= OFFER_TEXT_MAX);
 });

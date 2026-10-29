@@ -107,6 +107,7 @@ export interface WireMessage {
   t: string;
   id?: number;
   text?: string;
+  entries?: HistoryEntry[];
   utterance?: number;
   bt?: number;
   emotion?: string;
@@ -119,10 +120,22 @@ export interface WireMessage {
   turn?: number;
   phase?: string;
 }
+// A history entry as the runtime reads it: a message, a reply that called
+// tools (`tool_calls`), or a tool's result (`tool_call_id`)
+export interface HistoryEntry {
+  role: string;
+  content: string;
+  tool_calls?: { id: string; name: string; arguments: string }[];
+  tool_call_id?: string;
+}
 export interface Transcript {
   role: "user" | "assistant";
   content: string;
   source?: string;
+  // a reply that called tools: what it adds to the history in place of `content`
+  entries?: HistoryEntry[];
+  // how much of `content` the entries hold; the rest was said after them
+  covered?: number;
 }
 export interface Activity {
   time: number;

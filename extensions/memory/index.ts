@@ -263,6 +263,15 @@ export function render(store: Store, recalled: string[], limits: Config["prompt"
 
 const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
 
+// What the runtime puts in place of a reply that only called tools
+// (ACTED_TURN in runtime/src/markers.ts). Extensions import nothing from the
+// runtime, so it is written out here too.
+const ACTED_TURN = "[acted]";
+
+// Whether an assistant message is something the character said: a message that
+// only carried tool calls says nothing, and neither does `[acted]`.
+const said = (role: unknown, content: string) => role === "assistant" && content.trim() !== "" && content.trim() !== ACTED_TURN;
+
 async function beforeLlm(state: Input["state"], c: Config) {
 	// a turn something else stopped isn't a conversation to remember
 	if (state.cancel === true) return;
@@ -275,7 +284,9 @@ async function beforeLlm(state: Input["state"], c: Config) {
 		name: typeof state.character.name === "string" ? cut(state.character.name, 100) : "the character",
 		...(typeof state.character.description === "string" ? { description: cut(state.character.description, 300) } : {}),
 	};
-	const history = state.messages ?? [];
+	// the conversation is what was said: not the calls and their results, nor a
+	// reply that only acted
+	const history = (state.messages ?? []).filter((m) => m.role === "user" || said(m.role, String(m.content ?? "")));
 	// the conversation before the message, for context; the message is sent apart
 	const last = history.length && history[history.length - 1].role === "user" ? history.length - 1 : history.length;
 	const recent = history.slice(Math.max(0, last - 6), last).map((m) => ({ role: m.role, content: cut(String(m.content), 300) }));

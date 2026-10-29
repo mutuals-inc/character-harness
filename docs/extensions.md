@@ -17,6 +17,7 @@ hooks:
   after_turn: { blocking: false }
 requires_env: [MY_EXTENSION_API_KEY]
 # service: true                      # also runs a service for the whole session (see "Services")
+# tools: [...]                       # functions the chat model may call (see "Tools")
 ```
 
 | Key | Required | What |
@@ -27,9 +28,10 @@ requires_env: [MY_EXTENSION_API_KEY]
 | `hooks.<hook>.blocking` | no | Default `true`. |
 | `hooks.<hook>.timeout_ms` | no | Blocking hooks only. Default `5000`. |
 | `service` | no | `true` to run the handler's exported `service` for the whole session. Module handlers only. See "Services". |
+| `tools` | no | Tools the chat model gets every turn, each `{ name, description, parameters }`. Needs the `on_tool_call` hook. See "Tools". |
 | `requires_env` | no | Keys the extension needs from `.env`: names, or `{ config: model.api_key_env }` for a key the character's config for the extension names (dotted path). The runtime checks them at startup and keeps them from the player. |
 
-Hooks: `on_session_start`, `before_reply`, `before_llm`, `after_llm`, `on_sentence`, `on_speak`, `after_turn`, `on_session_end`.
+Hooks: `on_session_start`, `before_reply`, `before_llm`, `after_llm`, `on_tool_call`, `on_sentence`, `on_speak`, `after_turn`, `on_session_end`.
 
 ## Using it in a character
 
@@ -67,6 +69,48 @@ An extension runs with the runtime's access: your keys, your files, the network.
 
 A module may also export `check({ config, body })` (the name is reserved for this), which `npm run check` and `npm start` call before any conversation. `body` is what the player has for the character: `{ emotions, registers, gestures, cameras }`, each a list of names, or `null` when it can't be told from here (a profile this checkout doesn't have, say). It returns `{ errors, warnings }`, lists of messages, or nothing when all is well. The extension picks how serious each problem is: a warning is shown and the character starts anyway; an error is shown and `npm start` stops. The runtime only shows what it gets. The director, for example, makes a missing model or prompt an error, since it can't work without them, and a gesture, emotion, talking style or camera move the character doesn't have a warning, since on stage it would only do nothing.
 
+## Tools
+
+An extension gives the chat model tools by listing them in its `extension.yaml`, or by adding them to `state.tools` on `before_llm` when they change from turn to turn. It runs them on `on_tool_call`, which the runtime calls only on the extension whose tool the model called, once per call, with the call beside the state. See "Tools" in `architecture.md` for the whole turn.
+
+```yaml
+name: weather
+handler: index.ts
+hooks:
+  on_tool_call: { timeout_ms: 3000 }
+tools:
+  - name: weather
+    description: The weather now in a city.
+    parameters: { type: object, properties: { city: { type: string } }, required: [city] }
+```
+
+```ts
+export default async function ({ call, state, config, signal }) {
+  const { city } = JSON.parse(call.arguments);
+  const now = await fetch(`https://weather.example/now?city=${encodeURIComponent(city)}`, { signal }).then((r) => r.text());
+  return { result: { content: now } };
+}
+```
+
+`call` is `{ id, name, arguments }`, with `arguments` the JSON text as the model wrote it. It may not parse or match the schema, so check it. It hands back one of:
+
+| `result` | What the model gets | Asks the model again |
+|---|---|---|
+| `{ content }` | the content | yes |
+| `{ error }` | `Error: ` and the error, so it can say so or try again | yes |
+| `{ pending: true }` | that the result will come later | no |
+| nothing | `Done.` | no |
+
+So a lookup answers `content`, and an action with nothing to report, like playing a song, answers nothing. A tool that throws or runs out of time gives the model an error. `on_tool_call` is always blocking; its `timeout_ms` is how long the model waits for the tool.
+
+`signal` is aborted when the app cuts the turn off and when the tool runs out of time. The model has then been told the tool failed or was never told it ran, and may call it again, so a handler must honor it: pass it to what it awaits (`fetch`, a game's API), check it before it acts, and not act once it is aborted. The runtime can't stop a handler that ignores it. An HTTP handler gets everything else as JSON, and its request is aborted with `signal`.
+
+No call runs until `before_reply` has let the turn through, so a turn the gate or moderation cancels has run no tool.
+
+A tool is the extension's that added it. The runtime sets each tool's `by` itself, so a `by` an extension writes on a tool it adds is ignored: an extension can't send calls to another one's `on_tool_call`. A tool whose extension has no `on_tool_call` gives the model an error, not `Done.`.
+
+A tool that answers `pending` gives its result later from the extension's service, with `result(call, content)` (see "Services"). It offers a turn that hands the model the result. That turn is an offer, so its text is held to an offer's limits: `result` makes it fit rather than refuse it. A `\r` becomes a newline, any other control character but a tab a space, and text past 4000 characters (with `The result of <name>: ` in front) is cut short, saying so. A result `on_tool_call` hands back at once has no such limit.
+
 ## Services
 
 A hook runs when the runtime calls it, inside a turn. A service runs on its own for the whole session: it watches something outside the conversation and can start a turn. See "Services and offers" in `architecture.md`.
@@ -74,7 +118,7 @@ A hook runs when the runtime calls it, inside a turn. A service runs on its own 
 An extension with `service: true` in its `extension.yaml` exports a `service` function beside its default one. An extension that is only a service needs no `hooks` and no default export.
 
 ```ts
-export async function service({ config, session, signal, log, ext, offer, voice }) {
+export async function service({ config, session, signal, log, ext, offer, result, voice }) {
   // runs until `signal` is aborted, when the session ends
 }
 ```
@@ -87,6 +131,7 @@ export async function service({ config, session, signal, log, ext, offer, voice 
 | `log(line)` | writes a line to the runtime's log |
 | `ext.get()` / `ext.set(value)` | read and replace the extension's own `state.ext.<name>`. A write is kept for the session, and the next hook sees it, even one running on the turn already open |
 | `offer(req)` | offers a turn (below). Resolves to `accepted`, `expired` or `closed` |
+| `result(call, content, req?)` | offers a turn with the result of a call whose tool answered `pending`, with `source: tool`, cut to fit an offer (see "Tools"). `req` takes the rest of an offer's keys; one that isn't valid rejects the promise |
 | `voice.state` | what the player's voice is doing: `idle`, `listening`, `thinking`, `speaking`, or `offline` when the player has no offers link |
 | `voice.since` | `Date.now()` when `voice.state` last changed |
 | `voice.on(fn)` | calls `fn(state)` on every change; returns the function that stops it |

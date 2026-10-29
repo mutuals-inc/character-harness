@@ -15,6 +15,7 @@ const hookLabels: Record<string, string> = {
   on_session_start: "Session started",
   before_reply: "Deciding to reply",
   before_llm: "Preparing reply",
+  on_tool_call: "Running a tool",
   after_llm: "Reply generated",
   on_sentence: "Shaping speech",
   on_speak: "Speaking",

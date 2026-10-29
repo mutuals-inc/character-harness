@@ -4,6 +4,8 @@ import { AudioOutput } from "./audio/output.ts";
 import { Microphone } from "./audio/input.ts";
 import { Captions } from './audio/captions.ts';
 import type { WireMessage } from "./types.ts";
+import { historyOf } from "./lib/history.ts";
+import { unvoiced } from "./lib/markers.ts";
 import { withStudioCue, withStudioHook } from "./lib/studio-live.ts";
 
 export const output = new AudioOutput();
@@ -182,7 +184,19 @@ function handleMessage(event: MessageEvent) {
     remainder += message.text ?? "";
     changed();
     collectSentences(false);
+  } else if (message.t === "llm_calls" && message.id === replyId) {
+    // calls that ran are kept even if the reply is cut off or fails later
+    const reply = state.messages.at(-1)!;
+    reply.entries = [...(reply.entries ?? []), ...(message.entries ?? [])];
+    // they hold what the reply said so far; anything after goes in the history after them
+    reply.covered = reply.content.length;
   } else if (message.t === "llm_done" && message.id === replyId) {
+    // a reply that called tools keeps its calls, their results and what it said after
+    const reply = state.messages.at(-1)!;
+    if (message.entries?.length) {
+      reply.entries = message.entries;
+      reply.covered = reply.content.length;
+    }
     collectSentences(true);
     replyId = null;
     if (!sentences.length && speechId === null) status("Ready for a reply");
@@ -233,7 +247,7 @@ function collectSentences(final: boolean) {
   const chunks = remainder.split(/(?<=[.!?。！？])\s+(?![^\[]*\])/u);
   remainder = final ? "" : (chunks.pop() ?? "");
   for (const text of chunks)
-    if (text.trim() && text.trim() !== "…") sentences.push(text.trim());
+    if (text.trim() && !unvoiced(text)) sentences.push(text.trim());
   nextSentence();
 }
 
@@ -260,9 +274,7 @@ export async function submit(
   if (!state.connected) await startSession();
   cancelReply();
   state.messages.push({ role: "user", content: text.trim(), source });
-  const history = state.messages
-    .filter((m) => m.content.trim())
-    .map(({ role, content }) => ({ role, content }));
+  const history = historyOf(state.messages);
   state.messages.push({ role: "assistant", content: "" });
   replyId = ++sequence;
   remainder = "";

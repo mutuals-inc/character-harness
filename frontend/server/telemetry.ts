@@ -47,6 +47,7 @@ export function instrument(extensions: Loaded[], socket: WebSocket): Loaded[] {
     config: {},
     requires_env: [],
     service: false,
+    tools: [],
     hooks: new Map(
       HOOKS.map((hook) => [hook, { blocking: true, timeout_ms: 1000 }]),
     ),

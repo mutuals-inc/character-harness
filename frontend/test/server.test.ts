@@ -111,7 +111,7 @@ test(
     const metadata = await get("/api/bootstrap", "GET", { Cookie: cookie });
     assert.equal(metadata.status, 200);
     const body = JSON.parse(metadata.body);
-    assert.equal(body.hooks.length, 8);
+    assert.equal(body.hooks.length, 9);
     assert.ok(body.chatPresets.length > 0);
     const foxglove = characterById("foxglove");
     assert.equal(body.voicePresets[0].name, foxglove.name);
