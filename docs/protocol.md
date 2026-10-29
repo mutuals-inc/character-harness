@@ -59,7 +59,7 @@ When an extension cancels a turn, the reply is a single `{t:"llm_delta", id, tex
 
 A turn the chat model chose to stay quiet on, by answering the character's `models.chat.silent_reply`, looks the same to the app. The app keeps `…` in the history as it would for any silent reply.
 
-A turn where the chat model only called tools (see "Tools" in `architecture.md`) is its `llm_calls`, then a single `{t:"llm_delta", id, text:"[acted]"}`, then `llm_done` with its `entries`. The app voices `[acted]` as silence, like `…`. It is plain text, not a field of `llm_done`, because an app that keeps only the reply's text (the player) needs a reply with text, and keeps `[acted]` in its history so the model can tell the turn from a silent reply. Both strings are `SILENT_TURN` and `ACTED_TURN` in `runtime/src/markers.ts`; the app and the bundled extensions write them out again, and a test checks the app's agree.
+A turn where the chat model only called tools (see "Tools" in `architecture.md`) is its `llm_calls`, then a single `{t:"llm_delta", id, text:"[acted]"}`, then `llm_done` with its `entries`. The app voices `[acted]` as silence, like `…`. It is plain text, not a field of `llm_done`, because an app that keeps only the reply's text (the player) needs a reply with text, and keeps `[acted]` in its history so the model can tell the turn from a silent reply. Both strings are `SILENT_TURN` and `ACTED_TURN` in `runtime/src/markers.ts`; the app and the bundled extensions write them out again, and tests check theirs agree.
 
 ### Tools in the history
 

@@ -2,7 +2,8 @@
 // text, not fields, so an app that keeps only a reply's text still has one
 // (docs/protocol.md). The app voices neither, and keeps both in its history.
 // frontend/src/lib/markers.ts and the bundled extensions write them out again,
-// since they import nothing from the runtime; a test there checks they agree.
+// since they import nothing from the runtime; frontend/test/markers.test.ts and
+// runtime/test/markers.test.ts check they agree.
 
 // A turn that makes no sound: cancelled, or the model's silent reply. The app
 // waits ~12 s on a turn with no text before calling the model dead, so it gets
