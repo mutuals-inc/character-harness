@@ -60,6 +60,9 @@ interface Force {
 	tries: number;
 	error?: string; // why the last try failed, for the next one
 	offered?: string;
+	// aborted when the force is over or replaced: withdraws its offer and ends
+	// the wait for its turn
+	over: AbortController;
 }
 
 // What the hooks see in state.ext["game-link"].
@@ -78,6 +81,15 @@ interface ToolCall {
 
 type ToolResult = { content: string } | { error: string } | { pending: true };
 
+interface OfferRequest {
+	text: string;
+	source?: string;
+	quiet_ms?: number;
+	ttl_ms?: number;
+	priority?: number;
+	signal?: AbortSignal;
+}
+
 type VoiceState = "idle" | "listening" | "thinking" | "speaking" | "offline";
 
 interface Context {
@@ -86,7 +98,7 @@ interface Context {
 	signal: AbortSignal;
 	log(line: string): void;
 	ext: { set(value: unknown): void };
-	offer(req: { text: string; source?: string; quiet_ms?: number; ttl_ms?: number; priority?: number }): Promise<string>;
+	offer(req: OfferRequest): Promise<string>;
 	voice: { readonly state: VoiceState; on(fn: (state: VoiceState) => void): () => void };
 }
 
@@ -105,12 +117,23 @@ const TURN_MS = 60_000;
 // after its turn, how long a force waits for the game's result before trying again
 const SETTLE_MS = 1500;
 const MAX_LINE = 2000;
+// the longest text an offer may have, as the runtime takes it
 const MAX_OFFER = 4000;
 
 const ACTION_NAME = /^[a-zA-Z0-9_-]{1,64}$/;
-const cut = (s: string, n: number) => (s.length > n ? `${s.slice(0, n)}…` : s);
+// at most `n` characters, the ellipsis included, and never half a surrogate pair
+const cut = (s: string, n: number) => {
+	if (s.length <= n) return s;
+	const end = /[\ud800-\udbff]/.test(s[n - 2]) ? n - 2 : n - 1;
+	return `${s.slice(0, end)}…`;
+};
 // game text goes in the prompt between <game> tags; it can't close them
 const plain = (s: string) => s.replace(/<\/?game>/gi, "");
+// game text without the control characters an offer refuses: any line break
+// is a newline, and the rest go
+const clean = (s: string) => s.replace(/\r\n?/g, "\n").replace(/[\u0000-\u0008\u000b-\u001f\u007f]/g, "");
+// the same line, whatever whitespace was trimmed or changed on its way
+const same = (a: string, b: string) => a.replace(/\s+/g, " ").trim() === b.replace(/\s+/g, " ").trim();
 
 interface Game {
 	name: string;
@@ -121,6 +144,7 @@ interface Game {
 // an action sent to a game, waiting for its result
 interface Sent {
 	game: string;
+	ws: WebSocket; // the connection it went out on
 	name: string;
 	args: string;
 	timer: ReturnType<typeof setTimeout>;
@@ -152,16 +176,25 @@ class Link {
 			// malformed or unknown messages are ignored, as the protocol says
 			if (msg && typeof msg === "object") this.handle(ws, msg);
 		});
+		// a frame over maxPayload, or one that isn't valid, fails the connection;
+		// without a listener that would throw and take the session down
+		ws.on("error", (e) => {
+			this.ctx.log(`a game's connection failed: ${e.message}`);
+			ws.terminate();
+		});
 		ws.on("close", () => {
+			this.abandon((p) => p.ws === ws, "left before answering");
 			for (const g of this.games.values()) if (g.ws === ws) this.drop(g.name);
 		});
 	}
 
 	close() {
+		this.setForce(null);
 		for (const p of this.pending.values()) {
 			clearTimeout(p.timer);
 			p.answered?.({ error: "the game went away" });
 		}
+		this.pending.clear();
 		// not the close handshake, which a game that doesn't answer holds open for 30 s
 		for (const g of this.games.values()) g.ws.terminate();
 		this.games.clear();
@@ -169,13 +202,32 @@ class Link {
 
 	private drop(game: string) {
 		this.games.delete(game);
-		if (this.force?.game === game) this.force = null;
+		if (this.force?.game === game) this.setForce(null);
 		this.ctx.log(`${game} left`);
 		this.publish();
 	}
 
+	// Ends the current force, or puts a new one in its place: the old one's
+	// offer is withdrawn, so it can't start a turn or hold the new one back.
+	private setForce(f: Force | null) {
+		this.force?.over.abort();
+		this.force = f;
+	}
+
+	// Actions that will never be answered: the game left, or started over. The
+	// model stops waiting, and the game may be sent another.
+	private abandon(which: (p: Sent) => boolean, why: string) {
+		for (const [id, p] of this.pending) {
+			if (!which(p)) continue;
+			this.pending.delete(id);
+			clearTimeout(p.timer);
+			this.note(`you did ${p.name}, and ${p.game} ${why}`);
+			p.answered?.({ error: `${p.game} ${why}` });
+		}
+	}
+
 	private handle(ws: WebSocket, msg: { command?: unknown; game?: unknown; data?: unknown }) {
-		const name = typeof msg.game === "string" ? msg.game.trim().slice(0, 100) : "";
+		const name = typeof msg.game === "string" ? plain(clean(msg.game)).trim().slice(0, 100) : "";
 		if (!name || typeof msg.command !== "string") return;
 		const data = (msg.data && typeof msg.data === "object" ? msg.data : {}) as Record<string, unknown>;
 		let game = this.games.get(name);
@@ -188,14 +240,16 @@ class Link {
 		switch (msg.command) {
 			case "startup":
 				game.actions.clear();
-				if (this.force?.game === name) this.force = null;
+				if (this.force?.game === name) this.setForce(null);
+				this.abandon((p) => p.game === name, "started over before answering");
 				break;
 			case "context": {
-				if (typeof data.message !== "string" || !data.message.trim()) return;
-				this.note(`${name}: ${data.message.trim()}`);
+				const message = typeof data.message === "string" ? clean(data.message).trim() : "";
+				if (!message) return;
+				this.note(`${name}: ${message}`);
 				if (data.silent !== true) {
-					this.said.push(`${name}: ${plain(data.message.trim())}`);
-					void this.speak();
+					this.said.push(`${name}: ${plain(message)}`);
+					void this.speak().catch((e) => this.ctx.log(`offering what ${name} said failed: ${e instanceof Error ? e.message : String(e)}`));
 				}
 				break;
 			}
@@ -206,7 +260,7 @@ class Link {
 				const names = Array.isArray(data.action_names) ? data.action_names.filter((n): n is string => typeof n === "string") : [];
 				for (const n of names) game.actions.delete(n);
 				// a force whose actions are all gone is over
-				if (this.force?.game === name && this.force.names.every((n) => !game.actions.has(n))) this.force = null;
+				if (this.force?.game === name && this.force.names.every((n) => !game.actions.has(n))) this.setForce(null);
 				break;
 			}
 			case "actions/force":
@@ -234,29 +288,32 @@ class Link {
 		}
 		for (const other of this.games.values())
 			if (other !== game && other.actions.delete(name)) this.ctx.log(`${game.name} took action ${name} over from ${other.name}`);
-		game.actions.set(name, { name, description: typeof description === "string" ? description : "", ...(empty ? {} : { schema }) });
+		game.actions.set(name, { name, description: typeof description === "string" ? clean(description) : "", ...(empty ? {} : { schema }) });
 	}
 
 	private forced(game: Game, data: Record<string, unknown>) {
 		const names = Array.isArray(data.action_names)
 			? data.action_names.filter((n): n is string => typeof n === "string" && game.actions.has(n))
 			: [];
-		if (typeof data.query !== "string" || !names.length) {
+		const query = typeof data.query === "string" ? clean(data.query).trim() : "";
+		const state = typeof data.state === "string" ? clean(data.state).trim() : "";
+		if (!query || !names.length) {
 			this.ctx.log(`${game.name}: an actions force without a query or registered actions was ignored`);
 			return;
 		}
 		if (this.force) this.ctx.log(`${game.name}: a new actions force replaced the one from ${this.force.game}`);
 		const priority = (["low", "medium", "high", "critical"] as const).find((p) => p === data.priority) ?? "low";
-		this.force = {
+		this.setForce({
 			game: game.name,
-			query: data.query,
-			...(typeof data.state === "string" && data.state.trim() ? { state: data.state } : {}),
+			query,
+			...(state ? { state } : {}),
 			ephemeral: data.ephemeral_context === true,
 			priority,
 			names,
 			tries: 0,
-		};
-		void this.press();
+			over: new AbortController(),
+		});
+		void this.press().catch((e) => this.ctx.log(`offering ${game.name}'s actions force failed: ${e instanceof Error ? e.message : String(e)}`));
 	}
 
 	private result(data: Record<string, unknown>) {
@@ -266,7 +323,7 @@ class Link {
 		this.pending.delete(data.id as string);
 		clearTimeout(p.timer);
 		const ok = data.success === true;
-		const message = typeof data.message === "string" ? data.message.trim() : "";
+		const message = typeof data.message === "string" ? clean(data.message).trim() : "";
 		const args = p.args && p.args !== "{}" ? ` ${p.args}` : "";
 		this.note(`you did ${p.name}${args}${ok ? "" : ", and it failed"}${message ? `: ${message}` : ""}`);
 		p.answered?.(ok ? { content: plain(message) || "done" } : { error: plain(message) || "it failed" });
@@ -277,7 +334,7 @@ class Link {
 			f.error = message || "it failed";
 			return;
 		}
-		this.force = null;
+		this.setForce(null);
 		if (!f.ephemeral) {
 			this.note(`${f.game} asked you: ${f.query}`);
 			if (f.state) this.note(`${f.game}: ${f.state}`);
@@ -287,8 +344,10 @@ class Link {
 	// Sends the call to the game whose action it is, and resolves with the
 	// game's answer, or `pending` when it takes longer than the model waits.
 	// The protocol runs one action at a time, so a call while another is out is
-	// refused.
-	act(call: ToolCall): Promise<ToolResult> {
+	// refused. `signal` is on_tool_call's: once it aborts, the turn has gone on
+	// without the answer, which still goes in the prompt when it comes.
+	act(call: ToolCall, signal?: AbortSignal): Promise<ToolResult> {
+		if (signal?.aborted) return Promise.resolve({ error: "the call was cancelled" });
 		const game = this.owner(call.name);
 		if (!game) {
 			this.ctx.log(`the character called ${call.name}, which no game has any more`);
@@ -300,6 +359,7 @@ class Link {
 		const args = call.arguments.trim();
 		const sent: Sent = {
 			game: game.name,
+			ws: game.ws,
 			name: call.name,
 			args,
 			timer: setTimeout(() => {
@@ -313,12 +373,12 @@ class Link {
 		const withData = args && !(args === "{}" && !game.actions.get(call.name)!.schema);
 		this.send(game, "action", { id, name: call.name, ...(withData ? { data: args } : {}) });
 		return new Promise((done) => {
-			const late = setTimeout(() => {
-				sent.answered = undefined;
-				done({ pending: true });
-			}, WAIT_MS);
+			const stop = () => sent.answered?.({ pending: true });
+			const late = setTimeout(stop, WAIT_MS);
+			signal?.addEventListener("abort", stop, { once: true });
 			sent.answered = (r) => {
 				clearTimeout(late);
+				signal?.removeEventListener("abort", stop);
 				sent.answered = undefined;
 				done(r);
 			};
@@ -335,7 +395,7 @@ class Link {
 		const f = this.force;
 		if (!f) return;
 		this.ctx.log(`${f.game}: every action its force names (${f.names.join(", ")}) has the name of another extension's tool, so the force was dropped`);
-		this.force = null;
+		this.setForce(null);
 		this.publish();
 	}
 
@@ -373,7 +433,7 @@ class Link {
 		try {
 			while (this.said.length && !this.ctx.signal.aborted) {
 				const text = cut(this.said.splice(0).join("\n"), MAX_OFFER);
-				if ((await this.ctx.offer({ text, source: "game", ttl_ms: 30_000 })) === "closed") return;
+				if ((await this.offer({ text, source: "game", ttl_ms: 30_000 })) === "closed") return;
 			}
 		} finally {
 			this.speaking = false;
@@ -389,35 +449,53 @@ class Link {
 				const f = this.force;
 				if (f.tries >= this.c.force_tries) {
 					this.ctx.log(`${f.game}: the character didn't act on its actions force in ${f.tries} turns; it was dropped`);
-					this.force = null;
+					this.setForce(null);
 					this.publish();
 					return;
 				}
-				const text = cut(`${f.error ? `${f.game}: that didn't work: ${f.error}\n` : ""}${f.game}: ${f.query}`, MAX_OFFER);
-				f.offered = plain(text);
+				f.offered = cut(plain(`${f.error ? `${f.game}: that didn't work: ${f.error}\n` : ""}${f.game}: ${f.query}`), MAX_OFFER).trim();
 				this.publish();
-				const outcome = await this.ctx.offer({
+				const outcome = await this.offer({
 					text: f.offered,
 					source: "game",
 					priority: PRIORITY[f.priority],
 					quiet_ms: QUIET_MS[f.priority],
 					ttl_ms: TURN_MS,
+					signal: f.over.signal,
 				});
 				if (outcome === "closed") return;
+				if (outcome === "failed" && this.force === f) {
+					this.setForce(null);
+					this.publish();
+					return;
+				}
 				// a force replaced meanwhile goes out at once, not after this turn
 				if (outcome !== "accepted" || this.force !== f) continue;
 				f.tries++;
 				f.error = undefined;
-				await this.turnOver();
+				await this.turnOver(f.over.signal);
 			}
 		} finally {
 			this.pressing = false;
 		}
 	}
 
+	// Offers a turn. One the runtime refuses (it never should: the text is
+	// cleaned and cut to fit) is logged and resolves `failed`, not thrown.
+	private async offer(req: OfferRequest): Promise<string> {
+		try {
+			return await this.ctx.offer(req);
+		} catch (e) {
+			this.ctx.log(`an offer was refused: ${e instanceof Error ? e.message : String(e)}`);
+			return "failed";
+		}
+	}
+
 	// resolves once the voice has left idle and come back, plus a moment for
-	// the game's result, or after TURN_MS
-	private turnOver(): Promise<void> {
+	// the game's result, or after TURN_MS, or at once when the session ends or
+	// the force is over
+	private turnOver(force: AbortSignal): Promise<void> {
+		const stop = AbortSignal.any([this.ctx.signal, force]);
 		return new Promise((done) => {
 			let left = this.ctx.voice.state !== "idle";
 			let over = false;
@@ -426,15 +504,16 @@ class Link {
 				over = true;
 				off();
 				clearTimeout(timer);
-				this.ctx.signal.removeEventListener("abort", finish);
-				setTimeout(done, this.ctx.signal.aborted ? 0 : SETTLE_MS);
+				stop.removeEventListener("abort", finish);
+				setTimeout(done, stop.aborted ? 0 : SETTLE_MS);
 			};
 			const off = this.ctx.voice.on((s) => {
 				if (s !== "idle") left = true;
 				else if (left) finish();
 			});
 			const timer = setTimeout(finish, TURN_MS);
-			this.ctx.signal.addEventListener("abort", finish, { once: true });
+			if (stop.aborted) finish();
+			else stop.addEventListener("abort", finish, { once: true });
 		});
 	}
 }
@@ -516,19 +595,21 @@ export function section(seen: Seen, forced: boolean): string {
 
 const toolOf = (a: Action) => ({ name: a.name, description: a.description, ...(a.schema ? { parameters: a.schema } : {}) });
 
-export default function ({ event, state, call }: { event: string; state: State; call?: ToolCall }) {
+export default function ({ event, state, call, signal }: { event: string; state: State; call?: ToolCall; signal?: AbortSignal }) {
 	const seen = state.ext[NAME] as Seen | undefined;
 	if (event === "on_tool_call" && call) {
 		const link = links.get(state.session.id);
-		return (link ? link.act(call) : Promise.resolve<ToolResult>({ error: "no game is connected" })).then((result) => ({ result }));
+		return (link ? link.act(call, signal) : Promise.resolve<ToolResult>({ error: "no game is connected" })).then((result) => ({ result }));
 	}
 	if (event !== "before_llm" || !seen?.games.length) return;
 	// the model gets the first tool of a name, so an action another extension's
 	// tool has the name of is left out
 	const taken = new Set((state.tools ?? []).map((t) => t.name));
 	const offerable = seen.games.flatMap((g) => g.actions).filter((a) => !taken.has(a.name));
-	// only the force's own offer is its turn, not another line the game said
-	let forced = state.input?.offered_by === NAME && !!seen.force?.offered && state.input?.text === seen.force.offered;
+	// only the force's own offer is its turn, not another line the game said.
+	// The runtime trims the offer, and the player sends its text back, so it is
+	// matched whatever happened to its whitespace on the way
+	let forced = state.input?.offered_by === NAME && !!seen.force?.offered && same(state.input?.text ?? "", seen.force.offered);
 	if (forced && !offerable.some((a) => seen.force!.names.includes(a.name))) {
 		links.get(state.session.id)?.unwinnable();
 		forced = false;

@@ -13,6 +13,7 @@ import { test, type TestContext } from "node:test";
 import WebSocket from "ws";
 import link, { check, service } from "../../extensions/game-link/index.ts";
 import { checkCharacter } from "../src/check.ts";
+import { checkOffer, OFFER_TEXT_MAX, type OfferRequest } from "../src/offers.ts";
 import { loadExtensions } from "../src/extensions.ts";
 import { loadCharacter } from "../src/manifest.ts";
 
@@ -29,11 +30,14 @@ async function until(done: () => boolean, what: string) {
 	}
 }
 
-// The service in a fake session. `answer` plays the player for every offer.
-async function served(t: TestContext, answer: (req: { text: string }) => Promise<string> | string = () => "expired", config = {}) {
+// The service in a fake session. `answer` plays the player for every offer,
+// which is checked as the runtime checks it. `offers` has each one without its
+// signal; an offer waiting on `answer` resolves `withdrawn` when it is aborted.
+async function served(t: TestContext, answer: (req: OfferRequest) => Promise<string> | string = () => "expired", config = {}) {
 	const ac = new AbortController();
 	const lines: string[] = [];
 	const offers: Record<string, unknown>[] = [];
+	const withdrawn: string[] = [];
 	const listeners = new Set<(s: Voice) => void>();
 	let ext: Record<string, unknown> = {};
 	const voice = {
@@ -50,9 +54,18 @@ async function served(t: TestContext, answer: (req: { text: string }) => Promise
 		signal: ac.signal,
 		log: (l) => lines.push(l),
 		ext: { set: (v) => { ext = v as Record<string, unknown>; } },
-		offer: async (req) => {
-			offers.push(req);
-			return answer(req);
+		offer: (req) => {
+			checkOffer(req);
+			const { signal, ...rest } = req;
+			offers.push(rest);
+			if (signal?.aborted) return Promise.resolve("withdrawn");
+			return new Promise((done) => {
+				signal?.addEventListener("abort", () => {
+					withdrawn.push(req.text);
+					done("withdrawn");
+				});
+				Promise.resolve(answer(req)).then(done);
+			});
 		},
 		voice,
 	});
@@ -70,6 +83,7 @@ async function served(t: TestContext, answer: (req: { text: string }) => Promise
 		url,
 		lines,
 		offers,
+		withdrawn,
 		session,
 		ext: () => ext as never as { games: { name: string; actions: { name: string }[] }[]; context: string[]; force: unknown },
 		setVoice(s: Voice) {
@@ -81,8 +95,8 @@ async function served(t: TestContext, answer: (req: { text: string }) => Promise
 			return (link({ event, state: { session, prompt: "You are a test.", ext: { "game-link": ext }, ...extra } as never }) as { state?: unknown } | undefined)?.state;
 		},
 		// the character calls one of the game's actions
-		async call(name: string, args = "{}") {
-			const out = link({ event: "on_tool_call", state: { session, ext: { "game-link": ext } } as never, call: { id: "c", name, arguments: args } });
+		async call(name: string, args = "{}", signal?: AbortSignal) {
+			const out = link({ event: "on_tool_call", state: { session, ext: { "game-link": ext } } as never, call: { id: "c", name, arguments: args }, signal });
 			return ((await out) as { result: unknown }).result;
 		},
 	};
@@ -354,4 +368,166 @@ test("a game that answers slowly leaves the model a result to come, which goes i
 	g.send("action/result", { id: action.id, success: true, message: "Passed." });
 	await until(() => s.ext().context.length === 1, "the result");
 	assert.deepEqual(s.ext().context, ["you did pass: Passed."]);
+});
+
+test("a frame too big for the server drops that game, and the session goes on", async (t) => {
+	const s = await served(t);
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games?.length === 1, "the game");
+	g.ws.send(JSON.stringify({ command: "context", game: "Test Game", data: { message: "x".repeat(1 << 20) } }));
+	await until(() => s.ext().games.length === 0, "the game to be dropped");
+	assert.ok(s.lines.some((l) => l.startsWith("a game's connection failed")));
+	// the server still takes games
+	const again = await game(s.url);
+	again.send("startup");
+	await until(() => s.ext().games.length === 1, "the game to connect again");
+});
+
+test("control characters in what a game sends never reach an offer, and an offer that fails is logged, not thrown", async (t) => {
+	const unhandled: unknown[] = [];
+	const onUnhandled = (e: unknown) => unhandled.push(e);
+	process.on("unhandledRejection", onUnhandled);
+	t.after(() => { process.off("unhandledRejection", onUnhandled); });
+	const s = await served(t, (req) => {
+		if (req.text.includes("boom")) throw new Error("the runtime refused it");
+		return "accepted";
+	});
+	const g = await game(s.url);
+	g.send("context", { message: "Round over\r\nYou won\u0007.\r\n", silent: false });
+	await until(() => s.offers.length === 1, "the offer");
+	assert.equal(s.offers[0].text, "Test Game: Round over\nYou won.");
+	g.send("actions/register", { actions: [pass] });
+	g.send("actions/force", { query: "Pick\r\na card.\r\n", state: "\u001b[1mHand\u001b[0m", action_names: ["pass"] });
+	await until(() => s.offers.length === 2, "the force's offer");
+	assert.equal(s.offers[1].text, "Test Game: Pick\na card.");
+	assert.deepEqual((s.ext().force as { state?: string }).state, "[1mHand[0m");
+
+	// an offer the runtime refuses anyway
+	g.send("context", { message: "boom", silent: false });
+	await until(() => s.lines.some((l) => l.includes("an offer was refused: the runtime refused it")), "the log line");
+	g.send("actions/force", { query: "boom", action_names: ["pass"] });
+	await until(() => s.ext().force === null, "the force that can't be offered to be dropped");
+	await new Promise((r) => setTimeout(r, 20));
+	assert.deepEqual(unhandled, []);
+});
+
+test("a long offer is cut to the runtime's limit, ellipsis included, and never in half a character", async (t) => {
+	const s = await served(t, () => "accepted");
+	const g = await game(s.url);
+	g.send("context", { message: "a".repeat(5000), silent: false });
+	await until(() => s.offers.length === 1, "the offer");
+	const text = s.offers[0].text as string;
+	assert.equal(text.length, OFFER_TEXT_MAX);
+	assert.ok(text.endsWith("a…"));
+	// "Test Game: " is 11 characters, so the emoji starts at the 3999th
+	g.send("context", { message: `${"b".repeat(OFFER_TEXT_MAX - 13)}🎲${"b".repeat(100)}`, silent: false });
+	await until(() => s.offers.length === 2, "the second offer");
+	assert.equal(s.offers[1].text, `Test Game: ${"b".repeat(OFFER_TEXT_MAX - 13)}…`);
+	g.send("actions/register", { actions: [pass] });
+	g.send("actions/force", { query: "q".repeat(5000), action_names: ["pass"] });
+	await until(() => s.offers.length === 3, "the force's offer");
+	assert.equal((s.offers[2].text as string).length, OFFER_TEXT_MAX);
+});
+
+test("a force's turn is known whatever happened to its line's whitespace", async (t) => {
+	const s = await served(t, () => "accepted");
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass, useItem] });
+	g.send("actions/force", { query: "  Pick a card.\n", action_names: ["pass"] });
+	await until(() => s.offers.length === 1, "the force's offer");
+	assert.equal(s.offers[0].text, "Test Game: Pick a card.");
+	const out = s.hook("before_llm", { input: { text: " Test Game:  Pick a card.\r\n", offered_by: "game-link" } }) as {
+		tools: { name: string }[];
+		tool_choice?: string;
+	};
+	assert.deepEqual(out.tools.map((x) => x.name), ["pass"]);
+	assert.equal(out.tool_choice, "required");
+});
+
+test("an action the game will never answer, because it left or started over, doesn't hold the next one", async (t) => {
+	const s = await served(t);
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games?.[0]?.actions.length === 1, "the action");
+	const first = s.call("pass");
+	await until(() => g.got.some((m) => m.command === "action"), "the action");
+	g.send("startup");
+	assert.deepEqual(await first, { error: "Test Game started over before answering" });
+	g.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games[0].actions.length === 1, "the action again");
+	const second = s.call("pass");
+	await until(() => g.got.filter((m) => m.command === "action").length === 2, "the second action");
+
+	// the game crashes, and comes back
+	g.ws.terminate();
+	assert.deepEqual(await second, { error: "Test Game left before answering" });
+	const back = await game(s.url);
+	back.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games?.[0]?.actions.length === 1, "the action after reconnecting");
+	void s.call("pass");
+	await until(() => back.got.some((m) => m.command === "action"), "the action on the new connection");
+	assert.ok(s.ext().context.includes("you did pass, and Test Game left before answering"));
+});
+
+test("a force replaced while its offer waits withdraws that offer, and the new one goes out at once", async (t) => {
+	// the player never takes an offer on its own
+	const s = await served(t, () => new Promise(() => {}));
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass, useItem] });
+	g.send("actions/force", { query: "Pick a card.", action_names: ["pass"] });
+	await until(() => s.offers.length === 1, "the first force's offer");
+	g.send("actions/force", { query: "Pick a target.", priority: "critical", action_names: ["use_item"] });
+	await until(() => s.offers.length === 2, "the new force's offer");
+	assert.deepEqual(s.withdrawn, ["Test Game: Pick a card."]);
+	assert.equal(s.offers[1].text, "Test Game: Pick a target.");
+	// a force that ends because its game left withdraws its offer too
+	g.ws.close();
+	await until(() => s.withdrawn.length === 2, "the second offer to be withdrawn");
+	assert.equal(s.ext().force, null);
+});
+
+test("a force replaced during its turn goes out without waiting for that turn to end", async (t) => {
+	const s = await served(t, () => "accepted");
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass, useItem] });
+	g.send("actions/force", { query: "Pick a card.", action_names: ["pass"] });
+	await until(() => s.offers.length === 1, "the first force's offer");
+	// its turn never shows on the voice, which would hold it for a minute
+	await new Promise((r) => setTimeout(r, 20));
+	g.send("actions/force", { query: "Pick a target.", action_names: ["use_item"] });
+	await until(() => s.offers.length === 2, "the new force's offer");
+	assert.equal(s.offers[1].text, "Test Game: Pick a target.");
+});
+
+test("a call whose turn has gone on is not sent, or stops waiting for the game's answer", async (t) => {
+	const s = await served(t);
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games?.[0]?.actions.length === 1, "the action");
+	assert.deepEqual(await s.call("pass", "{}", AbortSignal.abort()), { error: "the call was cancelled" });
+	await new Promise((r) => setTimeout(r, 20));
+	assert.equal(g.got.some((m) => m.command === "action"), false);
+
+	const ac = new AbortController();
+	const began = Date.now();
+	const called = s.call("pass", "{}", ac.signal);
+	await until(() => g.got.some((m) => m.command === "action"), "the action");
+	ac.abort();
+	assert.deepEqual(await called, { pending: true });
+	assert.ok(Date.now() - began < 1000, "it stopped waiting at once");
+	// the game's answer still goes in the prompt
+	g.send("action/result", { id: g.got.find((m) => m.command === "action")!.data!.id, success: true });
+	await until(() => s.ext().context.length === 1, "the result");
+	assert.deepEqual(s.ext().context, ["you did pass"]);
+});
+
+test("the tools other extensions added pass through game-link unchanged, so they keep their owner", async (t) => {
+	const s = await served(t);
+	const g = await game(s.url);
+	g.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games?.[0]?.actions.length === 1, "the action");
+	const theirs = { name: "remember", description: "Remember something.", by: "memory" };
+	const out = s.hook("before_llm", { tools: [theirs] }) as { tools: Record<string, unknown>[] };
+	assert.deepEqual(out.tools, [theirs, { name: "pass", description: "End your turn." }]);
 });
