@@ -1157,3 +1157,30 @@ test("calls and results before_llm cut apart are put back in pairs before the mo
 	]);
 	await s.close();
 });
+
+test("a silent reply that writes on keeps the calls it finished before the text, on Chat Completions as on Responses", async (t) => {
+	const { exts: list, ran } = acting([useItem]);
+	const enc = new TextEncoder();
+	// the body stays open after its events until the request is aborted
+	const open = (events: unknown[], signal: AbortSignal) =>
+		new Response(
+			new ReadableStream({
+				start(c) {
+					for (const e of events) c.enqueue(enc.encode(`data: ${JSON.stringify(e)}\n\n`));
+					signal.addEventListener("abort", () => c.error(new DOMException("aborted", "AbortError")));
+				},
+			}),
+		);
+	const s = session(
+		t,
+		(_n, signal) =>
+			open([said("[pass]"), piece(0, { name: "use_item", arguments: '{"item":' }, "c"), piece(0, { arguments: '"key"}' }), said("x".repeat(250)), said("never read")], signal),
+		list,
+		quiet,
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.logged("turn 5: silent reply, nothing spoken, called use_item"), "the turn");
+	assert.equal(s.calls[0].aborted, true);
+	assert.deepEqual(ran, [{ ...call("c", '{"item":"key"}'), by: "kit" }]);
+	await s.close();
+});

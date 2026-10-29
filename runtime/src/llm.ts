@@ -96,14 +96,27 @@ function request(m: ChatModel, messages: Message[], tools: Tool[], choice?: Tool
 export class LlmStreamError extends Error {}
 
 // What one streamed `data:` payload adds: text, and the calls it finishes.
-// Chat Completions streams each call in pieces, by index, and the pieces are
-// whole only once the stream ends, so they wait in `calls` until then, in the
-// order they began; the Responses API hands each call over whole as its item
-// is done. Throws LlmStreamError on an error event.
+// Chat Completions streams each call in pieces, by index, so they wait in
+// `calls`, in the order they began. One is handed over once something comes
+// after it, another call or text, and its arguments are a whole JSON object;
+// the rest when the stream ends. So a reply stopped partway (a silent reply
+// that writes on) keeps the calls it finished, as on the Responses API, which
+// hands each call over whole as its item is done. Throws LlmStreamError on an
+// error event.
 interface Pending {
 	calls: ToolCall[];
 	at: Map<number, number>; // a piece's index -> the call in `calls` it adds to
+	out: number; // how many of `calls`, from the first, were handed over
 }
+
+const isObject = (args: string) => {
+	try {
+		const v = JSON.parse(args);
+		return typeof v === "object" && v !== null && !Array.isArray(v);
+	} catch {
+		return false;
+	}
+};
 
 function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done: ToolCall[] } {
 	const failed = (what: unknown) => new LlmStreamError(`the model failed: ${JSON.stringify(what).slice(0, 200)}`);
@@ -124,13 +137,24 @@ function delta(m: ChatModel, j: unknown, pending: Pending): { text: string; done
 				i = calls.push({ id: "", name: "", arguments: "" }) - 1;
 				if (index !== undefined) at.set(index, i);
 			}
+			// a call already handed over is done; a stray piece can't change it
+			if (i! < pending.out) continue;
 			const call = calls[i!];
 			if (p.id) call.id = p.id;
 			// some servers repeat the whole name on every piece
 			if (p.function?.name && !call.name) call.name = p.function.name;
 			if (p.function?.arguments) call.arguments += p.function.arguments;
 		}
-		return { text: d?.content ?? "", done: [] };
+		const text = d?.content ?? "";
+		// each call followed by another one, or by text, is done once its arguments are whole
+		const done: ToolCall[] = [];
+		while (pending.out < calls.length && (text || pending.out < calls.length - 1)) {
+			const call = calls[pending.out];
+			if (!call.name || !isObject(call.arguments)) break;
+			done.push(call);
+			pending.out++;
+		}
+		return { text, done };
 	}
 	const e = j as {
 		type?: string;
@@ -166,7 +190,7 @@ export async function* streamChat(
 	});
 	if (!resp.ok || !resp.body) throw new LlmHttpError(resp.status);
 	const dec = new TextDecoder();
-	const pending: Pending = { calls: [], at: new Map() };
+	const pending: Pending = { calls: [], at: new Map(), out: 0 };
 	let buf = "";
 	for await (const chunk of resp.body) {
 		buf += dec.decode(chunk, { stream: true });
@@ -180,9 +204,10 @@ export async function* streamChat(
 			let j: unknown;
 			try { j = JSON.parse(data); } catch { continue; }
 			const { text, done } = delta(m, j, pending);
-			if (text) yield text;
+			// calls the text came after go first, so a reader stopped by the text has them
 			yield* done;
+			if (text) yield text;
 		}
 	}
-	for (const call of pending.calls) if (call.name) yield call;
+	for (const call of pending.calls.slice(pending.out)) if (call.name) yield call;
 }
