@@ -536,3 +536,22 @@ test("the tools other extensions added pass through game-link unchanged, so they
 	const out = s.hook("before_llm", { tools: [theirs] }) as { tools: Record<string, unknown>[] };
 	assert.deepEqual(out.tools, [theirs, { name: "pass", description: "End your turn." }]);
 });
+
+test("a force names only the actions its game still has, and is over once another game takes them all", async (t) => {
+	const s = await served(t, () => new Promise(() => {}));
+	const a = await game(s.url, "Game A");
+	const b = await game(s.url, "Game B");
+	a.send("actions/register", { actions: [pass, useItem] });
+	a.send("actions/force", { query: "Your turn.", action_names: ["pass", "use_item"] });
+	await until(() => s.offers.length === 1, "the force's offer");
+	b.send("actions/register", { actions: [pass] });
+	await until(() => s.ext().games.length === 2, "the second game");
+	assert.deepEqual((s.ext().force as { names: string[] }).names, ["use_item"]);
+	// its turn offers only what is still its game's
+	const out = s.hook("before_llm", { input: { text: "Game A: Your turn.", offered_by: "game-link" } }) as { tools: { name: string }[] };
+	assert.deepEqual(out.tools.map((x) => x.name), ["use_item"]);
+	b.send("actions/register", { actions: [useItem] });
+	await until(() => s.ext().force === null, "the force to be dropped");
+	assert.deepEqual(s.withdrawn, ["Game A: Your turn."]);
+	assert.ok(s.lines.some((l) => l.includes("Game A: its actions force was dropped")));
+});

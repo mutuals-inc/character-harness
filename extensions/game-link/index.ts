@@ -263,8 +263,7 @@ class Link {
 			case "actions/unregister": {
 				const names = Array.isArray(data.action_names) ? data.action_names.filter((n): n is string => typeof n === "string") : [];
 				for (const n of names) game.actions.delete(n);
-				// a force whose actions are all gone is over
-				if (this.force?.game === name && this.force.names.every((n) => !game.actions.has(n))) this.setForce(null);
+				this.recheck();
 				break;
 			}
 			case "actions/force":
@@ -293,6 +292,21 @@ class Link {
 		for (const other of this.games.values())
 			if (other !== game && other.actions.delete(name)) this.ctx.log(`${game.name} took action ${name} over from ${other.name}`);
 		game.actions.set(name, { name, description: typeof description === "string" ? clean(description) : "", ...(empty ? {} : { schema }) });
+		this.recheck();
+	}
+
+	// A force names only actions its game still has: one unregistered, or
+	// taken over by another game, would go to the wrong game or none. A force
+	// left with none is over.
+	private recheck() {
+		const f = this.force;
+		if (!f) return;
+		const game = this.games.get(f.game);
+		f.names = f.names.filter((n) => game?.actions.has(n));
+		if (!f.names.length) {
+			this.ctx.log(`${f.game}: its actions force was dropped, as it no longer has any of the actions it names`);
+			this.setForce(null);
+		}
 	}
 
 	private forced(game: Game, data: Record<string, unknown>) {
