@@ -29,7 +29,9 @@ export interface HookInput {
 	state: State;
 	config: unknown;
 	call?: ToolCall; // on_tool_call: the call to run
-	signal?: AbortSignal; // on_tool_call: aborted when the turn is cut off; module handlers only
+	// on_tool_call: aborted when the turn is cut off or the call runs out of time.
+	// A module handler gets it; an HTTP handler's request is aborted with it.
+	signal?: AbortSignal;
 }
 type HookOutput = { state?: State; result?: unknown } | null | undefined | void;
 type Handler = (input: HookInput) => HookOutput | Promise<HookOutput>;
@@ -174,22 +176,37 @@ function toResult(r: unknown): ToolResult | undefined {
 // Runs one call through the on_tool_call of `e`, the extension whose tool it
 // is. Nothing handed back means the tool is done and has nothing to report. A
 // handler that throws or runs out of time gives the model an error instead.
+// The handler's `signal` is aborted when the turn is cut off and when it runs
+// out of time, so a tool the model was told failed can stop what it started.
+// `warn` hears a mistake in the extension itself, which a session says once.
 export async function runTool(
 	e: Loaded,
 	call: ToolCall,
 	state: State,
 	signal: AbortSignal,
 	log: (line: string) => void,
+	warn: (line: string) => void = log,
 ): Promise<ToolResult | undefined> {
 	const opts = e.hooks.get("on_tool_call");
-	if (!opts) return undefined;
+	if (!opts) {
+		warn(`[ext] ${e.name} offers ${call.name} but has no on_tool_call hook to run it`);
+		return { error: "the tool can't be run" };
+	}
+	const late = new AbortController();
 	try {
-		const input: HookInput = { event: "on_tool_call", state: structuredClone(state), config: e.config, call: { ...call }, signal };
+		const input: HookInput = {
+			event: "on_tool_call",
+			state: structuredClone(state),
+			config: e.config,
+			call: { ...call },
+			signal: AbortSignal.any([signal, late.signal]),
+		};
 		const out = await withTimeout(Promise.resolve().then(() => e.call(input)), opts.timeout_ms);
 		return toResult(out && typeof out === "object" ? out.result : undefined);
 	} catch (err) {
 		if (err instanceof TimedOut) {
-			log(`[ext] ${e.name} on_tool_call ${call.name} timed out after ${opts.timeout_ms}ms`);
+			late.abort(err);
+			log(`[ext] ${e.name} on_tool_call ${call.name} timed out after ${opts.timeout_ms}ms; it was aborted`);
 			return { error: "the tool took too long" };
 		}
 		log(`[ext] ${e.name} on_tool_call ${call.name} failed: ${errorText(err)}`);

@@ -114,7 +114,7 @@ One JSON file per character, `<dir>/<character id>.memory.json`:
 ## Limits
 
 - **Memory is per character, not per user.** The harness doesn't know who is talking, so everyone who talks to a character shares what it remembers, and what one user said can come up with another.
-- Only the user's last message is judged, one at a time; the conversation before it is context.
+- Only the user's last message is judged, one at a time; the conversation before it is context. That is what was said: tool calls, their results and the `[acted]` of a reply that only called tools are left out.
 - The pieces of a message are cut by punctuation and a few conjunctions, so a memory is at most a clause, a sentence or the whole message, and at most 400 characters.
 - Jev sees a shortlist, not the whole store, so a detail can only hang under, replace or recall a memory on it.
 - A message makes at most one memory. When it says two unrelated things, the one Jev thinks matters more is kept, or the whole message.
