@@ -618,7 +618,9 @@ test("a call streamed in pieces goes whole to the extension whose tool it is, an
 	assert.deepEqual(ran, [{ ...call("call_1", '{"item":"key"}'), by: "kit" }, { ...call("call_2"), by: "kit" }]);
 	assert.deepEqual(s.sentFor(5), [
 		{ t: "llm_delta", id: 5, text: "Here goes." },
-		callsRan([asked("Here goes.", call("call_1", '{"item":"key"}'), call("call_2")), result("call_1", "Done."), result("call_2", "Done.")]),
+		// each call goes to the app once it ran, the first with what the round said
+		callsRan([asked("Here goes.", call("call_1", '{"item":"key"}')), result("call_1", "Done.")]),
+		callsRan([asked("", call("call_2")), result("call_2", "Done.")]),
 		done([asked("Here goes.", call("call_1", '{"item":"key"}'), call("call_2")), result("call_1", "Done."), result("call_2", "Done."), acted]),
 	]);
 	assert.deepEqual(seen.state?.tool_calls, [
@@ -1313,5 +1315,59 @@ test("a turn the runtime fails on still ends, with an error the app is told, and
 	// the id is free again
 	s.app({ t: "llm", id: 5, history: [] });
 	await until(() => s.logged("turn 5: replied"), "the next reply");
+	await s.close();
+});
+
+test("a call that ran goes to the app at once, so a barge-in while a slower one runs keeps it", async (t) => {
+	const slow = gate();
+	const seen: { calls?: unknown } = {};
+	const wait = { ...useItem, name: "wait" };
+	const s = session(t, () => sse([piece(0, { name: "use_item", arguments: "{}" }, "fast"), piece(1, { name: "wait", arguments: "{}" }, "slow")]), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem, wait] } }),
+			on_tool_call: async ({ call }) => {
+				if (call!.name === "wait") await slow.shut;
+				return { result: { content: `${call!.name} ran` } };
+			},
+			after_turn: ({ state }) => { seen.calls = state.tool_calls; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.sentFor(5).length === 1, "the fast call");
+	assert.deepEqual(s.sentFor(5), [callsRan([asked("", { id: "fast", name: "use_item", arguments: "{}" }), result("fast", "use_item ran")])]);
+	// the user talks over the character while the slow call still runs
+	s.app({ t: "cancel", id: 5 });
+	slow.open();
+	await until(() => s.logged("turn 5: cut off by the app"), "the turn");
+	// the slow call ran after the cancel, so the app never got it
+	assert.equal(s.sentFor(5).length, 1);
+	s.app({ t: "llm", id: 6, history });
+	await until(() => seen.calls !== undefined, "turn 5's after_turn");
+	assert.deepEqual(seen.calls, [
+		{ id: "fast", name: "use_item", arguments: "{}", by: "kit", result: "use_item ran" },
+		{ id: "slow", name: "wait", arguments: "{}", by: "kit", result: "wait ran" },
+	]);
+	await s.close();
+});
+
+test("parallel calls reach after_turn in the order the model made them, whichever finished first", async (t) => {
+	const first = gate();
+	const seen: { calls?: { id: string }[] } = {};
+	const s = session(t, (n) => (n === 0 ? sse([piece(0, { name: "use_item", arguments: "{}" }, "a"), piece(1, { name: "use_item", arguments: "{}" }, "b")]) : noText()), [
+		exts("kit", {
+			before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }),
+			on_tool_call: async ({ call }) => {
+				if (call!.id === "a") await first.shut;
+			},
+			after_llm: ({ state }) => { seen.calls = state.tool_calls as { id: string }[]; },
+		}),
+	]);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => s.sentFor(5).length === 1, "b to finish");
+	first.open();
+	await until(() => s.logged("turn 5: silent reply"), "the turn");
+	assert.deepEqual(seen.calls?.map((c) => c.id), ["a", "b"]);
+	// the app got them as they finished, b first with what the round said
+	assert.deepEqual(s.sentFor(5).slice(0, 2), [callsRan([asked("", call("b")), result("b", "Done.")]), callsRan([asked("", call("a")), result("a", "Done.")])]);
 	await s.close();
 });

@@ -514,6 +514,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 		// round's text and calls, their results, and the last round's text
 		const entries: Message[] = [];
 		const calls: ToolCall[] = [];
+		const ranks: number[] = []; // each of `calls`, its place among its round's
 		const finish = (how: string) => {
 			// the app may have reused the id for a newer reply
 			if (llmStreams.get(id) === ac) llmStreams.delete(id);
@@ -679,19 +680,34 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				const by = kept.find((k) => k.tool.name === c.name)?.by;
 				if (by) c.by = by;
 			}
-			// The calls ran, so however the turn ends, after_turn sees them: they are
-			// in its state before anything waiting on them goes on.
-			const running = Promise.all(made.map(runCall)).then((results) => {
-				for (const [i, c] of made.entries()) calls.push({ ...c, result: resultText(results[i]) });
-				t.state.tool_calls = calls;
-				return results;
-			});
-			t.running = running;
-			const results = await running;
-			const asked: Message = { role: "assistant", content: quiet ? "" : spoken.trimStart(), tool_calls: made.map((c) => ({ id: c.id, name: c.name, arguments: c.arguments })) };
+			const content = quiet ? "" : spoken.trimStart();
+			const bare = (c: ToolCall): ToolCall => ({ id: c.id, name: c.name, arguments: c.arguments });
+			// Each call, once it ran, is in after_turn's state and goes to the app,
+			// so however the turn ends, both have it, even with a slower one still
+			// running. The first to finish carries what the round said.
+			let told = false;
+			const base = calls.length;
+			const ran = Promise.all(
+				made.map(async (c, i) => {
+					const r = await runCall(c);
+					// in the order the model made them, whichever finished first
+					const at = ranks.findIndex((k, j) => j >= base && k > i);
+					const where = at < 0 ? calls.length : at;
+					calls.splice(where, 0, { ...c, result: resultText(r) });
+					ranks.splice(where, 0, i);
+					t.state.tool_calls = calls;
+					// unless the app has cut the turn off and expects nothing more
+					if (!closed && !cancelledByApp.has(ac)) {
+						send({ t: "llm_calls", id, entries: [{ role: "assistant", content: told ? "" : content, tool_calls: [bare(c)] }, { role: "tool", tool_call_id: c.id, content: resultText(r) }] });
+						told = true;
+					}
+					return r;
+				}),
+			);
+			t.running = ran;
+			const results = await ran;
+			const asked: Message = { role: "assistant", content, tool_calls: made.map(bare) };
 			const answers = made.map((c, i): Message => ({ role: "tool", tool_call_id: c.id, content: resultText(results[i]) }));
-			// the app keeps them too, unless it has cut the turn off and expects nothing more
-			if (!closed && !cancelledByApp.has(ac)) send({ t: "llm_calls", id, entries: [asked, ...answers] });
 			request.push(asked, ...answers);
 			entries.push(asked, ...answers);
 			// the model is asked again when there is a result or an error to read
