@@ -1371,3 +1371,62 @@ test("parallel calls reach after_turn in the order the model made them, whicheve
 	assert.deepEqual(s.sentFor(5).slice(0, 2), [callsRan([asked("", call("b")), result("b", "Done.")]), callsRan([asked("", call("a")), result("a", "Done.")])]);
 	await s.close();
 });
+
+test("a turn a newer one closed runs no more calls and asks the model no more, so after_turn sees all it did", async (t) => {
+	const held = gate();
+	const late = gate();
+	const enc = new TextEncoder();
+	const seen: { turn?: number; calls?: unknown }[] = [];
+	let ran = 0;
+	const s = session(
+		t,
+		(n) => {
+			if (n === 0) return sse([piece(0, { name: "use_item", arguments: "{}" }, "c")]);
+			if (n === 1) return reply("ok");
+			// turn 7's reply makes its call only after turn 8 has closed it
+			if (n === 2)
+				return new Response(
+					new ReadableStream({
+						async start(c) {
+							await late.shut;
+							c.enqueue(enc.encode(`data: ${JSON.stringify(piece(0, { name: "use_item", arguments: "{}" }, "d"))}\n\ndata: [DONE]\n\n`));
+							c.close();
+						},
+					}),
+				);
+			return reply("ok");
+		},
+		[
+			exts("kit", {
+				before_llm: ({ state }) => ({ state: { ...state, tools: [useItem] } }),
+				on_tool_call: async () => {
+					ran++;
+					await held.shut;
+					// a result the model would read, so an open turn would ask again
+					return { result: { content: "used" } };
+				},
+				after_turn: ({ state }) => { seen.push({ turn: state.turn, calls: state.tool_calls }); },
+			}),
+		],
+	);
+	s.app({ t: "llm", id: 5, history });
+	await until(() => ran === 1, "turn 5's call");
+	s.app({ t: "llm", id: 6, history });
+	await until(() => s.logged("turn 6: replied"), "the newer reply");
+	held.open();
+	await until(() => seen.length === 1, "turn 5's after_turn");
+	assert.deepEqual(seen[0], { turn: 5, calls: [{ ...call("c"), by: "kit", result: "used" }] });
+	await until(() => s.logged("turn 5:"), "turn 5 to end");
+	// turn 5 asked the model once, turn 6 once
+	assert.equal(s.calls.length, 2);
+
+	s.app({ t: "llm", id: 7, history });
+	await until(() => s.calls.length === 3, "turn 7's model");
+	s.app({ t: "llm", id: 8, history });
+	await until(() => s.logged("turn 8: replied"), "turn 8");
+	late.open();
+	await until(() => s.logged("turn 7:"), "turn 7 to end");
+	assert.equal(ran, 1);
+	assert.deepEqual(s.sentFor(7), [{ t: "llm_delta", id: 7, text: "…" }, { t: "llm_done", id: 7 }]);
+	await s.close();
+});

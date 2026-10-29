@@ -600,6 +600,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			});
 		const request: Message[] = [{ role: "system", content: t.state.prompt ?? "" }, ...asSaid(paired(t.state.messages ?? []))];
 		let quiet = false; // the last round answered the silent reply
+		let unrun = false; // the model made calls the closed turn didn't run
 		let failure: string | null = null;
 		for (let round = 0; round < MAX_ROUNDS; round++) {
 			// before_reply may have cancelled the turn already
@@ -667,9 +668,11 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 				ac.signal.removeEventListener("abort", stop);
 			}
 			// no call runs until before_reply has let the reply through, so a turn
-			// it cancels has done nothing
+			// it cancels has done nothing; nor once a newer turn closed this one, so
+			// its after_turn sees every call it ran
 			const go = !failure && made.length > 0 && !(await replyCancelled);
-			if (!go || closed || ac.signal.aborted) {
+			if (go && t.closed) unrun = true;
+			if (!go || closed || t.closed || ac.signal.aborted) {
 				if (calls.length) entries.push({ role: "assistant", content: quiet ? SILENT_TURN : spoken.trim() ? spoken.trimStart() : ACTED_TURN });
 				break;
 			}
@@ -712,14 +715,14 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			entries.push(asked, ...answers);
 			// the model is asked again when there is a result or an error to read
 			const read = results.some((r) => r !== undefined && !("pending" in r));
-			if (closed || ac.signal.aborted || !read || last) {
+			if (closed || t.closed || ac.signal.aborted || !read || last) {
 				entries.push({ role: "assistant", content: ACTED_TURN });
 				break;
 			}
 		}
 		if (decided && !ac.signal.aborted && !closed) release();
 		// a reply with no text and no call would leave the app waiting on the model
-		if (!failure && !said.trim() && !quiet && !calls.length && !ac.signal.aborted && !closed) failure = "llm_empty";
+		if (!failure && !said.trim() && !quiet && !calls.length && !unrun && !ac.signal.aborted && !closed) failure = "llm_empty";
 		const cancelled = await replyCancelled;
 		if (closed) return;
 		// a barge-in: the app tore the turn down and expects nothing more for it
