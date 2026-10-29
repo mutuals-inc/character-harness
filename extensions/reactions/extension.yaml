@@ -1,3 +1,4 @@
+description: Adds character reactions to moments in a conversation.
 name: reactions
 handler: index.ts
 hooks:

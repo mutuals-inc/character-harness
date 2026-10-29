@@ -3,65 +3,91 @@ import { $, escape as e } from "../lib/dom.ts";
 import { icon } from "../lib/icons.ts";
 
 export function studio() {
-  const c = state.bootstrap!.character;
-  return `<div class="studio-grid"><div class="stage-column">
-    <div class="stage ${e(state.settings.background)}" id="character-stage">
-      <div id="stage-canvas"></div><div id="stage-loading" role="status">Getting the stage ready…</div>
-      <div class="stage-top"><span class="stage-badge"><span class="dot"></span><span id="stage-mode">PREVIEW</span></span><div class="stage-top-right"><span class="emotion-label">${icon("spark", 14)}<span id="current-emotion">Neutral</span></span><button class="stage-icon" data-action="fullscreen" aria-label="Expand character stage" title="Expand stage">${icon("expand", 16)}</button></div></div>
-      <div class="stage-signature"><span class="eyebrow">A LITTLE MORE ALIVE</span><h2 id="stage-character-name">${e(c.name)}</h2></div>
-      <div class="stage-bottom"><p class="stage-caption" id="stage-caption">Say hello when you’re ready.</p><div class="stage-controls"><button class="icon-button" data-action="mic" id="mic-toggle" aria-label="Turn on microphone" title="Microphone">${icon("micOff")}</button><span class="control-divider"></span><span class="audio-bars" aria-hidden="true">${"<i></i>".repeat(13)}</span><span class="control-divider"></span><button class="icon-button" data-action="speaker" id="speaker-toggle" aria-label="Mute character voice" title="Character voice">${icon("volume")}</button><button class="icon-button" data-action="context" aria-label="Add screen context" title="Screen context">${icon("screen")}</button><button class="icon-button" data-action="reset-stage" aria-label="Reset camera and pose" title="Reset stage">${icon("reset", 18)}</button></div></div>
-      <span class="stage-renderer" id="stage-renderer">Loading 3D player</span>
-    </div>
-    <form id="chat-form" class="chat-composer"><label for="chat-input" class="sr-only">Message the character</label><span class="composer-mark">${icon("spark", 19)}</span><input id="chat-input" name="message" placeholder="Say something to ${e(c.name)}…" autocomplete="off" maxlength="20000"/><kbd>↵</kbd><button type="submit" aria-label="Send message" class="send-button">${icon("up", 19)}</button></form>
-    <div class="performance-rack"><div><span class="eyebrow">TRY A LITTLE EXPRESSION</span><p>No session needed. Just a little personality.</p></div><div class="gesture-buttons">${c.body.gestures
-      .slice(0, 3)
-      .map(
-        (name) =>
-          `<button class="button gesture" data-gesture="${e(name)}">${icon(name === "wave" ? "wave" : name === "cheer" ? "spark" : "person", 16)}${e(name.charAt(0).toUpperCase() + name.slice(1))}</button>`,
-      )
-      .join(
-        "",
-      )}<label class="sr-only" for="gesture-select">More gestures</label><select id="gesture-select" aria-label="More gestures"><option value="">More…</option>${c.body.gestures
-      .slice(3)
-      .map((name) => `<option>${e(name)}</option>`)
-      .join("")}</select></div></div>
-  </div><aside class="inspector"><div class="inspector-tabs" role="tablist" aria-label="Session panel"><button role="tab" id="tab-overview" aria-selected="true" aria-controls="panel-overview" data-panel="overview">Overview</button><button role="tab" id="tab-conversation" aria-selected="false" aria-controls="panel-conversation" data-panel="conversation">Conversation <span id="message-count">0</span></button></div>
-    <div id="panel-overview" role="tabpanel" aria-labelledby="tab-overview"><div class="character-intro"><span class="avatar">${e(c.name.slice(0, 1))}<span class="avatar-star">✦</span></span><span class="eyebrow">YOUR CHARACTER</span><h2>Meet <span id="intro-name">${e(c.name)}</span>.</h2><p id="intro-description">${e(c.description)}</p><button class="text-button" data-view="character">Get to know the character ${icon("arrow", 15)}</button></div>
-    <div class="inspector-section"><div class="section-heading"><h3>In the room</h3><span class="subtle">SESSION</span></div><div class="info-row"><span>${icon("activity", 16)} Runtime</span><span class="connection-state"><span class="dot"></span><span id="runtime-state">Ready</span></span></div><div class="info-row"><span>${icon("mic", 16)} Microphone</span><button class="plain-button" data-action="mic" id="mic-label">Off ${icon("down", 12)}</button></div><div class="info-row"><span>${icon("headphones", 16)} Character voice</span><span>${e(c.voice.provider === "elevenlabs" ? "ElevenLabs" : c.voice.provider)}</span></div><div class="info-row"><span>${icon("hooks", 16)} Extensions</span><button class="plain-button" data-view="hooks" id="extension-count">${c.extensions.length} enabled ${icon("chevron", 12)}</button></div></div>
-    <div class="inspector-section"><div class="section-heading"><h3>Set the scene</h3></div><div class="scene-options"><label for="emotion-select">Expression</label><select id="emotion-select"><option value="neutral">Neutral</option>${c.body.emotions
-      .filter((x) => x !== "neutral")
-      .map(
-        (name) =>
-          `<option value="${e(name)}">${e(name.charAt(0).toUpperCase() + name.slice(1))}</option>`,
-      )
-      .join(
-        "",
-      )}</select><label for="camera-select">Framing</label><select id="camera-select"><option value="portrait">Portrait</option><option value="close-up">Close-up</option><option value="wide">Full character</option></select></div><div class="background-label"><span>Backdrop</span><div class="swatches" role="group" aria-label="Stage backdrop">${(["sky", "paper", "blue"] as const).map((bg) => `<button class="swatch ${bg}" data-background="${bg}" aria-label="${bg} backdrop" aria-pressed="${state.settings.background === bg}" title="${bg}"></button>`).join("")}</div></div></div>
-    <div class="inspector-footnote">${icon("spark", 20)}<p>Start with a hello.<br/><span>The rest is character.</span></p><button class="icon-button" data-action="stage-image" aria-label="Save a transparent stage image" title="Save stage image">${icon("camera", 16)}</button></div></div>
-    <div id="panel-conversation" role="tabpanel" aria-labelledby="tab-conversation" hidden><div class="transcript-tools"><span class="eyebrow">THIS SESSION</span><button class="text-button" data-action="export-transcript">Export ${icon("external", 12)}</button></div><div id="transcript" aria-live="polite" aria-relevant="additions text"></div><button class="button full" data-action="new-conversation">New conversation ${icon("reset", 15)}</button></div>
-  </aside></div>`;
+  const volume = state.settings.volume;
+  return `<div class="studio-grid"><div class="studio-stage-column">
+    <section class="stage ${e(state.settings.background)}" id="character-stage" aria-label="Character preview"><div id="stage-canvas"></div><p id="stage-loading" role="status">Loading character…</p><label class="studio-background stage-background"><span class="sr-only">Background</span><select id="background-select" aria-label="Background"><option value="sky" ${state.settings.background === "sky" ? "selected" : ""}>Clouds</option><option value="paper" ${state.settings.background === "paper" ? "selected" : ""}>Plain</option><option value="blue" ${state.settings.background === "blue" ? "selected" : ""}>Blue</option></select></label><button class="stage-expand icon-button" data-action="fullscreen" aria-label="Expand character stage" title="Expand stage" aria-expanded="false">${icon("expand")}</button><p class="stage-caption" id="stage-caption"></p></section>
+    <section class="studio-live surface" aria-labelledby="studio-live-title"><div class="studio-live-heading"><h2 id="studio-live-title">Live character</h2><span class="tag" id="character-presence">Offline</span></div><div class="studio-state-grid"><div><small>Emotion</small><strong id="live-emotion">Neutral</strong></div><div><small>Last reaction</small><strong id="live-reaction">None yet</strong></div></div><div class="live-extension-heading"><small>Extensions</small><span id="live-extension-count" class="subtle"></span></div><div id="live-extensions" class="live-extension-list"></div></section></div>
+    <section class="conversation" aria-labelledby="conversation-title"><div class="conversation-header"><h2 id="conversation-title">Conversation</h2><div class="toolbar"><button class="text-button" data-action="export-transcript">${icon("download", 16)} Export</button><button class="text-button" data-action="new-conversation" title="End the session and clear the conversation">${icon("plus", 16)} New conversation</button></div></div><div id="transcript" role="log" aria-live="polite" aria-relevant="additions text"></div><div class="studio-listening" id="studio-listening" role="status" data-state="idle"><span class="presence-dot"></span><span id="listening-state">Microphone off · session not started</span><span class="studio-input-meter" role="meter" aria-label="Live microphone level" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0"><span data-input-level></span></span></div><p id="live-transcript" class="live-transcript" hidden></p><form id="chat-form" class="chat-composer"><label for="chat-input" class="sr-only">Message</label><input id="chat-input" name="message" placeholder="Type a message…" autocomplete="off" maxlength="20000" required/><button type="submit" class="button primary">Send</button></form>
+    <div class="conversation-controls studio-audio-controls"><button class="button primary" id="session-toggle">Start session</button><button type="button" class="button mic-off" data-action="mic" id="mic-toggle" aria-label="Turn on microphone" aria-pressed="false">${icon("micOff", 16)} Microphone off</button><details class="studio-volume-menu"><summary class="icon-button" id="volume-toggle" aria-label="Character volume" title="Character volume">${icon("volume", 18)}</summary><div class="volume-popover"><div class="volume-heading"><strong>Character volume</strong><output id="volume-value" for="volume">${Math.round(volume * 100)}%</output></div><input type="range" id="volume" min="0" max="1" step="0.01" value="${volume}" aria-label="Character volume"/><button type="button" class="text-button" data-action="speaker" id="speaker-toggle">${icon("volume", 16)} Sound on</button></div></details><button type="button" class="icon-button" data-action="audio-setup" aria-label="Audio setup" title="Audio setup">${icon("gear", 18)}</button><button type="button" class="icon-button" data-action="context" aria-label="Send a screen note" title="Send a screen note">${icon("screen", 18)}</button></div></section></div>`;
+}
+
+const hookLabels: Record<string, string> = {
+  on_session_start: "Session started",
+  before_reply: "Deciding to reply",
+  before_llm: "Preparing reply",
+  on_tool_call: "Running a tool",
+  after_llm: "Reply generated",
+  on_sentence: "Shaping speech",
+  on_speak: "Speaking",
+  after_turn: "Turn completed",
+  on_session_end: "Session ended",
+};
+export function renderStudioLive() {
+  const live = state.live;
+  $("#live-emotion").textContent = live.emotion
+    .replace(/[-_]/g, " ")
+    .replace(/^./, (letter) => letter.toUpperCase());
+  $("#live-reaction").textContent = live.reaction;
+  const enabled = state.bootstrap!.character.extensions.filter(
+    (extension) => extension.enabled,
+  );
+  $("#live-extension-count").textContent = `${enabled.length} enabled`;
+  const ordered = [...enabled].sort(
+    (a, b) =>
+      (live.extensions[b.name]?.at ?? 0) - (live.extensions[a.name]?.at ?? 0),
+  );
+  $("#live-extensions").innerHTML =
+    ordered
+      .slice(0, 4)
+      .map((extension) => {
+        const event = live.extensions[extension.name];
+        const label = event
+          ? `${hookLabels[event.event] ?? event.event}${event.running ? " · working" : ` · ${event.duration ?? 0} ms`}`
+          : "Ready";
+        return `<div class="live-extension ${event?.running ? "running" : ""}"><span>${e(extension.name)}</span><small>${e(label)}</small></div>`;
+      })
+      .join("") ||
+    '<p class="subtle">No extensions enabled for this character.</p>';
+  if (enabled.length > 4)
+    $("#live-extensions").insertAdjacentHTML(
+      "beforeend",
+      `<p class="subtle">${enabled.length - 4} more enabled · recent activity appears first</p>`,
+    );
 }
 
 export function renderTranscript() {
-  const el = document.querySelector("#transcript");
-  if (!el) return;
-  $("#message-count").textContent = String(
-    state.messages.filter((m) => m.content).length,
-  );
-  el.innerHTML = state.messages.length
-    ? state.messages
-        .map(
-          (m) =>
-            `<article class="transcript-message ${m.role}"><span>${m.role === "user" ? "YOU" : e(state.bootstrap!.character.name.toUpperCase())}${m.source === "screen" ? " · SCREEN CONTEXT" : ""}</span><p>${e(m.content.replace(/\[[^\]]+\]/g, "").trim()) || '<span class="thinking">Thinking…</span>'}</p></article>`,
-        )
-        .join("")
-    : `<div class="empty-transcript">${icon("wave", 32)}<h3>A conversation starts here.</h3><p>Type a message or turn on your microphone. Your transcript stays here for this visit.</p></div>`;
-  el.scrollTop = el.scrollHeight;
-}
-
-export function showPanel(name: string) {
-  for (const panel of ["overview", "conversation"]) {
-    $(`#panel-${panel}`).hidden = panel !== name;
-    $(`#tab-${panel}`).setAttribute("aria-selected", String(panel === name));
+  const el = $("#transcript");
+  const atBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 40;
+  const messages = state.messages;
+  if (!messages.length) {
+    el.replaceChildren();
+    const empty = document.createElement("p");
+    empty.className = "empty-state";
+    empty.textContent = "Type a message or turn on your microphone to begin.";
+    el.append(empty);
+    return;
   }
+  el.querySelector(".empty-state")?.remove();
+  // Keep existing message nodes while streaming; update only changed text.
+  messages.forEach((message, index) => {
+    let article = el.children[index] as HTMLElement | undefined;
+    if (!article) {
+      article = document.createElement("article");
+      article.append(
+        document.createElement("strong"),
+        document.createElement("p"),
+      );
+      el.append(article);
+    }
+    article.className = `transcript-message ${message.role}`;
+    const label = `${message.role === "user" ? "You" : state.bootstrap!.character.name}${message.source === "screen" ? " · Screen note" : ""}`;
+    const content =
+      message.content.replace(/\[[^\]]+\]/g, "").trim() || "Thinking…";
+    if (article.children[0].textContent !== label)
+      article.children[0].textContent = label;
+    if (article.children[1].textContent !== content)
+      article.children[1].textContent = content;
+  });
+  while (el.children.length > messages.length) el.lastElementChild?.remove();
+  if (atBottom) el.scrollTop = el.scrollHeight;
 }

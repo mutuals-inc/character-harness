@@ -44,3 +44,24 @@ export async function readJson(
     throw new Error("Expected a JSON object.");
   return value as Record<string, unknown>;
 }
+
+export async function readFormData(req: IncomingMessage): Promise<FormData> {
+  const contentType = req.headers["content-type"] ?? "";
+  if (!contentType.startsWith("multipart/form-data;"))
+    throw new Error("Invalid upload request.");
+  let bytes = 0;
+  const chunks: Buffer[] = [];
+  for await (const chunk of req) {
+    bytes += chunk.length;
+    if (bytes > 160 * 1024 * 1024)
+      throw new Error(
+        "The request is too large. Upload at most 160 MB at a time.",
+      );
+    chunks.push(chunk);
+  }
+  return new Request("http://localhost/upload", {
+    method: "POST",
+    headers: { "content-type": contentType },
+    body: new Uint8Array(Buffer.concat(chunks)),
+  }).formData();
+}

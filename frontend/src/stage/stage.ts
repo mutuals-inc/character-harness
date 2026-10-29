@@ -153,7 +153,6 @@ export class CharacterStage {
       this.frameCamera("portrait", true);
       $("#stage-loading").hidden = true;
       this.enableControls(true);
-      $("#stage-renderer").textContent = "3D · Browser player";
       record(
         "stage",
         "Character loaded",
@@ -179,9 +178,7 @@ export class CharacterStage {
 
   private enableControls(enabled: boolean) {
     document
-      .querySelectorAll<HTMLButtonElement | HTMLSelectElement>(
-        '[data-gesture], #gesture-select, #emotion-select, #camera-select, [data-action="reset-stage"], [data-action="stage-image"]',
-      )
+      .querySelectorAll<HTMLButtonElement | HTMLSelectElement>("[data-gesture]")
       .forEach((control) => {
         control.disabled = !enabled;
       });
@@ -189,8 +186,6 @@ export class CharacterStage {
 
   emotion(name: string) {
     this.face?.set(name);
-    $("#current-emotion").textContent =
-      name.charAt(0).toUpperCase() + name.slice(1);
   }
   gesture(name: string) {
     if (!this.animation?.play(name))

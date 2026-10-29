@@ -10,7 +10,7 @@
 //           {t:"llm_delta",id,text} | {t:"llm_calls",id,entries}
 //           {t:"llm_done",id,entries?} | {t:"tts_done",id}
 //           {t:"beat",id,bt,emotion,talk,gesture,camera} | {t:"emotion",id,emotion}
-//           {t:"error",id,text}
+//           {t:"tts_alignment",id,alignment} | {t:"error",id,text}
 //     bin   [id:u8][PCM16 24 kHz]  TTS audio, tagged so concurrent sentences demux
 //
 // The app owns the conversation: it sends the whole history with each `llm`,
@@ -852,6 +852,7 @@ export function runSession(ws: WebSocket, character: Character, exts: Loaded[], 
 			newTurn,
 			onAudio: (pcm) => sendLeveled(leveler.process(pcm)),
 			onAlignment: (a) => {
+				send({ t: 'tts_alignment', id, alignment:a });
 				pushTiming(timing, a);
 				sp.align.push(a);
 				flushBeats(sp);

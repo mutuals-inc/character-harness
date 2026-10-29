@@ -1,4 +1,5 @@
 import type { Activity, Bootstrap, Settings, Transcript } from "./types.ts";
+import { initialStudioLive } from "./lib/studio-live.ts";
 const defaults: Settings = {
   inputDevice: "",
   outputDevice: "",
@@ -11,7 +12,6 @@ const defaults: Settings = {
   speakReplies: true,
   captions: true,
   background: "sky",
-  disabledExtensions: [],
   paused: false,
 };
 function load(): Settings {
@@ -26,11 +26,14 @@ function load(): Settings {
 }
 export const state = {
   bootstrap: null as Bootstrap | null,
-  view: "studio",
+  managedCharacter: null as import("./types.ts").CharacterInfo | null,
   settings: load(),
   connected: false,
   connecting: false,
   muted: true,
+  micMode: "off" as "off" | "test" | "live",
+  micPending: false,
+  live: initialStudioLive(),
   messages: [] as Transcript[],
   activity: [] as Activity[],
   status: "Ready when you are",

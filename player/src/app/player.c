@@ -32,6 +32,13 @@
 #include "audio.h"
 #include "hz_engine.h"
 #include "animation/animation.h"
+#include "generated/shaders/studio_alpha.h"
+#if defined(_WIN32)
+#include <windows.h>
+#elif defined(MACOS)
+#include <objc/message.h>
+#include <objc/runtime.h>
+#endif
 #if defined(HZ_PUBLISH) && defined(MACOS)
 #include <dirent.h>
 #include <stdio.h>
@@ -95,7 +102,45 @@ typedef struct AppState {
   char preview[PLAYER_ENV_MAX]; // HARNESS_PREVIEW
   f32 preview_t;
   char screenshot[PLAYER_ENV_MAX]; // HARNESS_SCREENSHOT
+  char studio_url[PLAYER_ENV_MAX];
+  OsWebSocket *studio_ws;
+  f32 studio_retry, studio_age, studio_mouth;
+  b32 studio_talking, studio_frame_pending, studio_frame_ready;
+  GpuRenderTarget studio_target, studio_composite;
+  GpuPipeline studio_alpha_pipeline;
+  GpuTexture studio_scene;
+  u8 *studio_pixels;
+  f32 studio_frame_time;
+  b32 studio_window_hidden;
+  u32 studio_width, studio_height, studio_wanted_width, studio_wanted_height;
 } AppState;
+
+#if defined(_WIN32)
+hz_internal BOOL CALLBACK player_studio_hide_window(HWND hwnd, LPARAM unused) {
+  UNUSED(unused);
+  DWORD pid=0;
+  GetWindowThreadProcessId(hwnd,&pid);
+  if (pid==GetCurrentProcessId() && !GetParent(hwnd)) ShowWindow(hwnd,SW_HIDE);
+  return TRUE;
+}
+#endif
+
+hz_internal void player_studio_hide_window_once(AppState *s) {
+  if (s->studio_window_hidden) return;
+#if defined(_WIN32)
+  EnumWindows(player_studio_hide_window,0);
+#elif defined(MACOS)
+  id app=((id (*)(id,SEL))objc_msgSend)((id)objc_getClass("NSApplication"),sel_registerName("sharedApplication"));
+  id windows=((id (*)(id,SEL))objc_msgSend)(app,sel_registerName("windows"));
+  unsigned long count=((unsigned long (*)(id,SEL))objc_msgSend)(windows,sel_registerName("count"));
+  for (unsigned long i=0;i<count;i++) {
+    id window=((id (*)(id,SEL,unsigned long))objc_msgSend)(windows,sel_registerName("objectAtIndex:"),i);
+    ((void (*)(id,SEL,id))objc_msgSend)(window,sel_registerName("orderOut:"),(id)0);
+  }
+  ((void (*)(id,SEL,long))objc_msgSend)(app,sel_registerName("setActivationPolicy:"),1);
+#endif
+  s->studio_window_hidden=true;
+}
 
 // true when `path` ends in `ext` (lowercase, with the dot), in any case
 hz_internal b32 player_has_ext(CString path, const char *ext) {
@@ -584,6 +629,75 @@ hz_internal void player_preview_tick(AppState *s, EcsWorld *w, f32 dt) {
         character_director_push_emotion(w, it.entities[i], name);
 }
 
+// Studio owns conversation and audio; this link only drives the native performance.
+hz_internal void player_studio_resolved(RendererState *r,const RendererPassCtx *ctx,void *user) {
+  UNUSED(r);
+  ((AppState *)user)->studio_scene=ctx->scene_depth;
+}
+
+hz_internal void player_studio_tick(AppState *s, f32 dt) {
+  s->studio_age += dt;
+  if (s->studio_age > 0.5f) { s->studio_mouth = 0; s->studio_talking = false; }
+  if (s->studio_ws && os_ws_state(s->studio_ws) != OS_WS_OPEN && os_ws_state(s->studio_ws) != OS_WS_CONNECTING) {
+    os_ws_close(s->studio_ws); s->studio_ws = NULL;
+  }
+  if (!s->studio_ws) {
+    s->studio_retry -= dt;
+    if (s->studio_retry <= 0) { s->studio_retry = 1; s->studio_ws = os_ws_connect(&(OsWsConfig){.url=s->studio_url}); s->studio_frame_ready=true; }
+  }
+  if (s->studio_ws && os_ws_state(s->studio_ws) == OS_WS_OPEN) tctx_temp_allocator_scope(ta, NULL) {
+    OsWsMessage msg = {0};
+    while (os_ws_recv(s->studio_ws, &msg, &ta.allocator)) {
+      if (msg.type != OS_WS_TEXT || msg.len > 8192) continue;
+      PJson *m = pjson_parse((const char *)msg.data, msg.len, &ta.allocator);
+      const char *type = pjson_string(pjson_get(m, "t"), "");
+      if (cstr_equal(type,"frame-ready")) s->studio_frame_ready=true;
+      if (cstr_equal(type, "state")) {
+        s->studio_age = 0;
+        s->studio_wanted_width=(u32)m_clampf((f32)pjson_number(pjson_get(m,"width"),960),240,1280);
+        s->studio_wanted_height=(u32)m_clampf((f32)pjson_number(pjson_get(m,"height"),720),240,1280);
+        s->studio_mouth = m_clampf((f32)pjson_number(pjson_get(m,"mouth"),0),0,1);
+        s->studio_talking = pjson_bool(pjson_get(m,"talking"),false);
+        EcsSceneSettings *settings = ecs_query_get_singleton(EcsSceneSettings, s->scene_settings_query);
+        if (settings) {
+          settings->clear_color=(ColorF32){0,0,0,0};
+        }
+      } else if (cstr_equal(type,"cue")) {
+        const char *emotion = pjson_string(pjson_get(m,"emotion"),"");
+        if (emotion[0]) for (EcsIter it=ecs_query_iter(s->model_query);ecs_iter_next(&it);)
+          for (i32 i=0;i<it.count;i++) character_director_push_emotion(s->world,it.entities[i],emotion);
+        player_body_beat(s,s->world,pjson_string(pjson_get(m,"talk"),""),pjson_string(pjson_get(m,"gesture"),""));
+        const char *camera = pjson_string(pjson_get(m,"camera"),"");
+        if (camera[0]) player_camera_move(s,s->world,camera);
+      }
+    }
+  }
+  i32 want = s->studio_talking ? ACTOR_STATE_TALKING : ACTOR_STATE_IDLE;
+  if (want != s->last_talk_want) {
+    s->last_talk_want = want;
+    for (EcsIter it=ecs_query_iter(s->model_query);ecs_iter_next(&it);)
+      for (i32 i=0;i<it.count;i++) character_actor_state_request(s->world,it.entities[i],want);
+  }
+}
+
+hz_internal void player_studio_mouth(AppState *s) {
+  if (s->studio_mouth <= 0) return;
+  RendererState *r=ecs_resource_get_mut(s->world,RendererState);
+  tctx_temp_allocator_scope(ta,NULL) {
+    for (EcsIter it=ecs_query_iter(s->model_query);ecs_iter_next(&it);) for(i32 i=0;i<it.count;i++) {
+      EcsEntity entity=it.entities[i];
+      const EcsFace *face=ecs_component_get(s->world,entity,EcsFace);
+      const EcsLipSync *lip=ecs_component_get(s->world,entity,EcsLipSync);
+      const EcsModelInstance *inst=ecs_component_get(s->world,entity,EcsModelInstance);
+      if (!face || !lip || !inst || !face->weights || lip->vowel_idx[0]<0 || (u32)lip->vowel_idx[0]>=face->bs_target_count) continue;
+      f32 *weights=ALLOC_ARRAY(&ta.allocator,f32,face->bs_target_count);
+      mem_cpy(weights,face->weights,sizeof(f32)*face->bs_target_count);
+      weights[lip->vowel_idx[0]]=m_clampf(s->studio_mouth*lip->max_weight[0],0,1);
+      renderer_model_instance_set_blendshape_weights(r,inst->instance,face->bs_mesh_index,weights,face->bs_target_count);
+    }
+  }
+}
+
 // advances the camera move and returns the framing to apply this frame
 hz_internal PlayerCamMove player_camera_tick(AppState *s, f32 dt) {
   if (!s->cam_active)
@@ -707,6 +821,7 @@ HZ_APP_API void app_init(AppMemory *memory) {
   state->mic_debug = flag[0] == '1';
   player_env(PLAYER_PREVIEW_ENV, "", state->preview);
   state->preview_t = PLAYER_PREVIEW_START;
+  player_env("HARNESS_STUDIO_URL", "", state->studio_url);
   // the engine keeps the path until the frame is captured
   player_env(PLAYER_SCREENSHOT_ENV, "", state->screenshot);
   if (state->screenshot[0]) {
@@ -722,7 +837,28 @@ HZ_APP_API void app_init(AppMemory *memory) {
   state->world = w;
   ecs_resource_set_ref(w, AppMemory, memory);
   ecs_input_init(w);
+  if (state->studio_url[0]) {
+    state->studio_width=state->studio_wanted_width=960;
+    state->studio_height=state->studio_wanted_height=720;
+    state->studio_target = gpu_make_render_target(&(GpuRenderTargetDesc){
+      .name="Studio preview", .width=960, .height=720,
+      .formats={GPU_TEXTURE_FORMAT_RGBA8_SRGB}, .sample_count=1,
+    });
+  }
+  if (state->studio_url[0]) {
+    state->studio_composite=gpu_make_render_target(&(GpuRenderTargetDesc){
+      .name="Studio transparent preview",.width=960,.height=720,
+      .formats={GPU_TEXTURE_FORMAT_RGBA8_SRGB},.sample_count=1,
+    });
+    GpuPipelineDesc desc=*shader_studio_alpha_pipeline_desc();
+    desc.depth_test=false; desc.depth_write=false; desc.cull_mode=GPU_CULL_NONE;
+    desc.color_formats[0]=GPU_TEXTURE_FORMAT_RGBA8_SRGB;
+    state->studio_alpha_pipeline=gpu_make_pipeline(&desc);
+  }
   ecs_renderer_init(w, &(RendererInitDesc){
+                           .output_target = state->studio_target,
+                           .output_width = state->studio_url[0] ? 960 : 0,
+                           .output_height = state->studio_url[0] ? 720 : 0,
                            .sample_count = 4,
                            .vertex_buffer_size = MB(8),
                            .index_buffer_size = MB(4),
@@ -735,6 +871,10 @@ HZ_APP_API void app_init(AppMemory *memory) {
                                       .cascade_size = 4096,
                                       .max_distance = 5.0f},
                        });
+  if (state->studio_url[0]) renderer_add_draw_source(ecs_resource_get_mut(w,RendererState),&(RendererDrawSourceDesc){
+    .name="Studio alpha",.flags=RENDERER_SOURCE_AFTER_RESOLVE|RENDERER_SOURCE_SAMPLES_SCENE_DEPTH,.user=state,
+    .record={[RENDERER_PHASE_AFTER_RESOLVE]=player_studio_resolved},
+  });
   ecs_transform_init(w, NULL);
   ecs_assets_init(w, NULL);
   ecs_cloth_init(w, NULL);
@@ -753,11 +893,13 @@ HZ_APP_API void app_init(AppMemory *memory) {
   state->camera_moves_asset =
       asset_load(CameraMoveSetBlobAsset, assets, .path = PLAYER_CAMERA_MOVES);
 
+  if (state->studio_url[0]) state->studio_pixels = ALLOC_ARRAY(&assets->allocator,u8,1280*1280*4+8);
   state->audio = audio_system_init(&assets->allocator, NULL);
   // lip sync reads the VOICE bus only
   audio_bus_set_tap(&state->audio, AUDIO_BUS_VOICE, true);
   ecs_audio_init(&state->audio, w);
 
+  if (!state->studio_url[0]) {
   state->mic_buf = ALLOC_ARRAY(&assets->allocator, f32, PLAYER_MIC_SCRATCH);
   mic_init(&state->mic);
   if (mic_permission() != OS_MIC_PERMISSION_GRANTED)
@@ -782,6 +924,8 @@ HZ_APP_API void app_init(AppMemory *memory) {
   // when an extension offers it a turn, over the offers link
   character_voice_hold_greeting(&state->vs, true);
   player_offers_init(&state->offers, state->url);
+
+  }
 
   scene_system_create(&state->scene_sys, w, assets, &assets->allocator);
   state->scene = scene_load_file(&state->scene_sys, APP_STAGE_SCENE);
@@ -853,11 +997,23 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   if (is_main_thread()) {
     app_character_update(&state->character, w);
     app_character_over_hair_update(&state->character, w);
-    player_mic_tick(state);
-    character_voice_tick(&state->vs, memory->dt);
-    player_offers_tick(&state->offers, &state->vs, memory->dt);
-    player_talk_tick(state, memory->dt);
-    player_mic_debug_tick(state, memory->dt);
+    if (state->studio_url[0]) {
+      player_studio_tick(state, memory->dt);
+      if (!state->studio_frame_pending && (state->studio_width!=state->studio_wanted_width || state->studio_height!=state->studio_wanted_height)) {
+        state->studio_width=state->studio_wanted_width;
+        state->studio_height=state->studio_wanted_height;
+        gpu_resize_render_target(state->studio_target,state->studio_width,state->studio_height);
+        gpu_resize_render_target(state->studio_composite,state->studio_width,state->studio_height);
+        renderer_set_output_target(ecs_resource_get_mut(w,RendererState),state->studio_target,state->studio_width,state->studio_height);
+      }
+    }
+    else {
+      player_mic_tick(state);
+      character_voice_tick(&state->vs, memory->dt);
+      player_offers_tick(&state->offers, &state->vs, memory->dt);
+      player_talk_tick(state, memory->dt);
+      player_mic_debug_tick(state, memory->dt);
+    }
   }
 
   ecs_input_schedule(w);
@@ -888,6 +1044,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   ecs_cloth_schedule_solve(w);
   ecs_flush(w, memory->dt);
 
+  if (is_main_thread() && state->studio_url[0]) player_studio_mouth(state);
   Camera *cam = ecs_query_get_singleton(Camera, state->camera_query);
   if (cam) {
     if (is_main_thread()) {
@@ -901,7 +1058,8 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
       cam->pos = v3_add(cam->pos, v3_scale(quat_rotate(cam->rot, V3_UP), move.y));
       cam->pos = v3_add(cam->pos,
                         v3_scale(quat_rotate(cam->rot, V3_BACK), move.distance));
-      camera_update(cam, memory->canvas_width, memory->canvas_height);
+      camera_update(cam, state->studio_url[0] ? state->studio_width : memory->canvas_width,
+                    state->studio_url[0] ? state->studio_height : memory->canvas_height);
     }
     EcsSceneSettings *settings =
         ecs_query_get_singleton(EcsSceneSettings, state->scene_settings_query);
@@ -924,11 +1082,11 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
     if (profile)
       state->bind_pose_body = !handle_is_valid(profile->idle_clip.handle);
     // plays emotes and loads assets, so only after every lane has synced
-    player_beat_tick(state, w);
+    if (!state->studio_url[0]) player_beat_tick(state, w);
     player_preview_tick(state, w, memory->dt);
     // the session speaks through the character; bound every frame so it
     // survives a character swap
-    for (EcsIter it = ecs_query_iter(state->model_query); ecs_iter_next(&it);)
+    if (!state->studio_url[0]) for (EcsIter it = ecs_query_iter(state->model_query); ecs_iter_next(&it);)
       if (it.count > 0) {
         character_voice_bind(&state->vs, w, it.entities[0]);
         break;
@@ -944,6 +1102,40 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
         else
           character_clear_gaze_target(w, it.entities[i]);
       }
+  }
+  if (is_main_thread() && state->studio_url[0]) {
+    player_studio_hide_window_once(state);
+    state->studio_frame_time += memory->dt;
+    if (state->studio_frame_pending) {
+      u32 width=0, height=0;
+      if (gpu_read_render_target(state->studio_composite,state->studio_pixels+8,&width,&height)) {
+        state->studio_frame_pending=false;
+        if (width<=1280 && height<=1280 && state->studio_ws &&
+            os_ws_state(state->studio_ws)==OS_WS_OPEN) {
+          for (u32 i=0;i<4;i++) {
+            state->studio_pixels[i]=(u8)(width>>(8*i));
+            state->studio_pixels[4+i]=(u8)(height>>(8*i));
+          }
+          os_ws_send_binary(state->studio_ws,state->studio_pixels,8+width*height*4);
+        }
+      }
+    }
+    if (!state->studio_frame_pending && state->studio_frame_ready && state->studio_frame_time>=1.0f/30.0f) {
+      gpu_texture_access(gpu_get_render_target_attachment(state->studio_target,0),GPU_ACCESS_SHADER_READ);
+      gpu_texture_access(state->studio_scene,GPU_ACCESS_SHADER_READ);
+      gpu_begin_pass(&(GpuPassDesc){.render_target=state->studio_composite});
+      gpu_apply_pipeline(state->studio_alpha_pipeline);
+      shader_studio_alpha_apply_bindings((ShaderStudioAlphaBindings){
+        .displayTexture=gpu_get_render_target_attachment(state->studio_target,0),
+        .sceneTexture=state->studio_scene,
+      });
+      gpu_draw(3,1);
+      gpu_end_pass();
+      gpu_queue_render_target_read(state->studio_composite,&(GpuReadRenderTargetDesc){0});
+      state->studio_frame_pending=true;
+      state->studio_frame_ready=false;
+      state->studio_frame_time=0;
+    }
   }
   perf_stats_end_frame();
 }

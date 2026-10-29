@@ -1,0 +1,8 @@
+model:
+  api_key_env: TYPESAFE_API_KEY
+beat:
+  nothing: ""
+  delight: happy
+  soften: sad
+  startle: surprised
+gestures: {}
