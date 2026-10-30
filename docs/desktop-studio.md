@@ -5,6 +5,10 @@ the native Kaigen renderer. It renders with Kaigen's character shaders, cloth an
 animations. There is no window picker, screen capture or Screen Recording
 permission. Use this mode for the native character appearance.
 
+Desktop mode doesn't run on Linux yet. On Linux, use Studio in the browser
+(`npm run frontend`) and run the native player on its own: the Linux release or
+your own build (`player/README.md`).
+
 ## Prerequisites
 
 - Node.js 24 or later, npm, and this repository checked out locally.

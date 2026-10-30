@@ -37,7 +37,7 @@ voice:
 
 rig:
   profile: foxglove
-  engine: ">=0.5.8"
+  engine: ">=0.6.3"
 
 emotions: foxglove
 

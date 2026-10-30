@@ -893,7 +893,16 @@ HZ_APP_API void app_init(AppMemory *memory) {
     .record={[RENDERER_PHASE_AFTER_RESOLVE]=player_studio_resolved},
   });
   ecs_transform_init(w, NULL);
+#ifdef WASM
   ecs_assets_init(w, NULL);
+#else
+  // A native publish build reads textures from their .zst siblings into the
+  // asset system's heap, and FoxGlove's alone come close to its default 64 MB.
+  // The reserve is a hard cap (a publish build crashes past it instead of
+  // asserting) but only address space until used, so it leaves room for
+  // imported models.
+  ecs_assets_init(w, &(AssetSystemCreateDesc){.reserve_size = GB(1)});
+#endif
   ecs_cloth_init(w, NULL);
   character_init(w, ecs_resource_get_mut(w, AssetSystem));
   AssetSystem *assets = ecs_resource_get_mut(w, AssetSystem);

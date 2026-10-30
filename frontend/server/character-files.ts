@@ -171,7 +171,7 @@ async function assets(
   if (model) {
     doc.deleteIn(["rig", "profile"]);
     doc.setIn(["rig", "model"], model);
-    doc.setIn(["rig", "engine"], ">=0.5.8");
+    doc.setIn(["rig", "engine"], ">=0.6.3");
   }
   if (typeof data.springs === "boolean")
     doc.setIn(["rig", "springs"], data.springs);
@@ -339,7 +339,7 @@ export async function createCharacter(form: FormData): Promise<{ id: string }> {
           .map((x) => x.trim())
           .filter(Boolean),
       },
-      rig: { engine: ">=0.5.8", springs: data.springs !== false },
+      rig: { engine: ">=0.6.3", springs: data.springs !== false },
       extensions: [],
       env_file: "../../.env",
     });

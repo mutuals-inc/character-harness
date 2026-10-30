@@ -12,6 +12,8 @@ The harness [Mutuals](https://github.com/mutuals-inc) uses to give life to its c
 - [Windows x64 — v0.1.0-windows-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-windows-x64)
 <!-- player-releases:end -->
 
+Player releases are made for Windows x64, macOS Apple Silicon and Linux x64;
+a platform shows up here once its first release is published.
 These links track the newest published version for each available platform,
 including pre-releases, and update automatically when releases change.
 [All releases](https://github.com/mutuals-inc/character-harness/releases).
