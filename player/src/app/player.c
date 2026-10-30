@@ -103,6 +103,9 @@ typedef struct AppState {
   f32 preview_t;
   char screenshot[PLAYER_ENV_MAX]; // HARNESS_SCREENSHOT
   char studio_url[PLAYER_ENV_MAX];
+  // Studio shows frames read back from an offscreen target (desktop), or the
+  // canvas a web build draws on, which the page shows itself
+  b32 studio_frames;
   OsWebSocket *studio_ws;
   f32 studio_retry, studio_age, studio_mouth;
   b32 studio_talking, studio_frame_pending, studio_frame_ready;
@@ -662,7 +665,8 @@ hz_internal void player_studio_tick(AppState *s, f32 dt) {
         s->studio_mouth = m_clampf((f32)pjson_number(pjson_get(m,"mouth"),0),0,1);
         s->studio_talking = pjson_bool(pjson_get(m,"talking"),false);
         EcsSceneSettings *settings = ecs_query_get_singleton(EcsSceneSettings, s->scene_settings_query);
-        if (settings) {
+        // a web canvas is always opaque, so it keeps the stage's background
+        if (settings && s->studio_frames) {
           settings->clear_color=(ColorF32){0,0,0,0};
         }
       } else if (cstr_equal(type,"cue")) {
@@ -839,6 +843,9 @@ HZ_APP_API void app_init(AppMemory *memory) {
   player_env(PLAYER_PREVIEW_ENV, "", state->preview);
   state->preview_t = PLAYER_PREVIEW_START;
   player_env("HARNESS_STUDIO_URL", "", state->studio_url);
+#ifndef WASM
+  state->studio_frames = state->studio_url[0] != 0;
+#endif
   // the engine keeps the path until the frame is captured
   player_env(PLAYER_SCREENSHOT_ENV, "", state->screenshot);
   if (state->screenshot[0]) {
@@ -854,7 +861,7 @@ HZ_APP_API void app_init(AppMemory *memory) {
   state->world = w;
   ecs_resource_set_ref(w, AppMemory, memory);
   ecs_input_init(w);
-  if (state->studio_url[0]) {
+  if (state->studio_frames) {
     state->studio_width=state->studio_wanted_width=960;
     state->studio_height=state->studio_wanted_height=720;
     state->studio_target = gpu_make_render_target(&(GpuRenderTargetDesc){
@@ -862,7 +869,7 @@ HZ_APP_API void app_init(AppMemory *memory) {
       .formats={GPU_TEXTURE_FORMAT_RGBA8_SRGB}, .sample_count=1,
     });
   }
-  if (state->studio_url[0]) {
+  if (state->studio_frames) {
     state->studio_composite=gpu_make_render_target(&(GpuRenderTargetDesc){
       .name="Studio transparent preview",.width=960,.height=720,
       .formats={GPU_TEXTURE_FORMAT_RGBA8_SRGB},.sample_count=1,
@@ -874,8 +881,8 @@ HZ_APP_API void app_init(AppMemory *memory) {
   }
   ecs_renderer_init(w, &(RendererInitDesc){
                            .output_target = state->studio_target,
-                           .output_width = state->studio_url[0] ? 960 : 0,
-                           .output_height = state->studio_url[0] ? 720 : 0,
+                           .output_width = state->studio_frames ? 960 : 0,
+                           .output_height = state->studio_frames ? 720 : 0,
                            .sample_count = 4,
                            .vertex_buffer_size = MB(8),
                            .index_buffer_size = MB(4),
@@ -888,7 +895,7 @@ HZ_APP_API void app_init(AppMemory *memory) {
                                       .cascade_size = 4096,
                                       .max_distance = 5.0f},
                        });
-  if (state->studio_url[0]) renderer_add_feature(ecs_resource_get_mut(w,RendererState),&(RendererFeatureDesc){
+  if (state->studio_frames) renderer_add_feature(ecs_resource_get_mut(w,RendererState),&(RendererFeatureDesc){
     .name="Studio alpha",.reads=RENDERER_RESOURCE_DEPTH,.user=state,
     .record={[RENDERER_PHASE_AFTER_RESOLVE]=player_studio_resolved},
   });
@@ -919,7 +926,7 @@ HZ_APP_API void app_init(AppMemory *memory) {
   state->camera_moves_asset =
       asset_load(CameraMoveSetBlobAsset, assets, .path = PLAYER_CAMERA_MOVES);
 
-  if (state->studio_url[0]) state->studio_pixels = ALLOC_ARRAY(&assets->allocator,u8,1280*1280*4+8);
+  if (state->studio_frames) state->studio_pixels = ALLOC_ARRAY(&assets->allocator,u8,1280*1280*4+8);
   state->audio = audio_system_init(&assets->allocator, NULL);
   // lip sync reads the VOICE bus only
   audio_bus_set_tap(&state->audio, AUDIO_BUS_VOICE, true);
@@ -1025,7 +1032,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
     app_character_over_hair_update(&state->character, w);
     if (state->studio_url[0]) {
       player_studio_tick(state, memory->dt);
-      if (!state->studio_frame_pending && (state->studio_width!=state->studio_wanted_width || state->studio_height!=state->studio_wanted_height)) {
+      if (state->studio_frames && !state->studio_frame_pending && (state->studio_width!=state->studio_wanted_width || state->studio_height!=state->studio_wanted_height)) {
         state->studio_width=state->studio_wanted_width;
         state->studio_height=state->studio_wanted_height;
         gpu_resize_render_target(state->studio_target,state->studio_width,state->studio_height);
@@ -1087,8 +1094,8 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
       cam->pos = v3_add(cam->pos, v3_scale(quat_rotate(cam->rot, V3_UP), move.y));
       cam->pos = v3_add(cam->pos,
                         v3_scale(quat_rotate(cam->rot, V3_BACK), move.distance));
-      camera_update(cam, state->studio_url[0] ? state->studio_width : memory->canvas_width,
-                    state->studio_url[0] ? state->studio_height : memory->canvas_height);
+      camera_update(cam, state->studio_frames ? state->studio_width : memory->canvas_width,
+                    state->studio_frames ? state->studio_height : memory->canvas_height);
     }
     EcsSceneSettings *settings =
         ecs_query_get_singleton(EcsSceneSettings, state->scene_settings_query);
@@ -1132,7 +1139,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
           character_clear_gaze_target(w, it.entities[i]);
       }
   }
-  if (is_main_thread() && state->studio_url[0]) {
+  if (is_main_thread() && state->studio_frames) {
     player_studio_hide_window_once(state);
     state->studio_frame_time += memory->dt;
     if (state->studio_frame_pending) {
