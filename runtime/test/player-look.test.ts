@@ -60,3 +60,16 @@ test("the web outline shader fits the sky light and fog without leaving maps out
 	assert.doesNotMatch(glsl, /#ifndef SHADER_BACKEND_WGSL\n#define HZ_RENDERER_IBL/);
 	assert.ok(materialMaps(glsl).length + SHADOW_TEXTURES + SKY_AND_FOG_TEXTURES <= WEBGPU_TEXTURES);
 });
+
+// The engine hands shaders a directional light as pre-exposed lux over pi, and
+// the toon shader takes it as MToon's light colour: a sun of 1 shows the lit
+// side at the base colour. At the engine's default exposure (EV100 15, which
+// the player keeps) that is 1.2 x 2^15 x pi lux.
+test("the stage's sun reaches the toon shader at 1", () => {
+	assert.doesNotMatch(read("src/app/player.c"), /renderer_set_exposure_ev100|renderer_set_auto_exposure/);
+	const scene = read("assets/mutuals/main_scene/chunk_0.hzt");
+	const sun = scene.slice(scene.indexOf("component EcsDirectionalLight\n"));
+	const lux = Number(/^ {2}intensity (\S+)$/m.exec(sun)![1]);
+	const preExposure = 1 / (1.2 * 2 ** 15);
+	assert.ok(Math.abs((lux * preExposure) / Math.PI - 1) < 1e-4, `the sun is ${lux} lux`);
+});

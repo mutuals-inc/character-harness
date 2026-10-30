@@ -88,7 +88,7 @@ component EcsDirectionalLight
     g 0.980392
     b 0.925490
     a 1.000000
-  intensity 39321.601563
+  intensity 123532.796875
   cast_shadow false
   shadow_strength 1.000000
   shadow_bias 0.050000
