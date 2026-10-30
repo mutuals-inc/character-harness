@@ -150,7 +150,12 @@ before saving. Extension changes persist in the character manifest. Enabled entr
   the same model and animation data. Kaigen's custom shading, cloth and certain
   expression effects are not reproduced exactly. Standard VRM spring bones are
   handled by the VRM loader when present. Profile joints hidden by the native
-  rig are also hidden in the browser.
+  rig are also hidden in the browser. The player now also builds for the
+  browser with WebGPU and Kaigen's own shaders
+  ([player README](../player/README.md#build-and-run-in-a-browser-webassembly)).
+  Before it can replace Three.js here, this server has to send cross-origin
+  isolation headers, the licensed build has to be supplied (it isn't in the
+  repository or CI), and imports, mic and the session socket have to work in it.
 - Desktop mode uses the actual native Kaigen renderer. Its application-level
   depth mask has the partial-transparency/bloom limits described above; macOS
   runtime verification remains pending.

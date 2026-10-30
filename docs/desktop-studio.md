@@ -9,7 +9,7 @@ permission. Use this mode for the native character appearance.
 
 - Node.js 24 or later, npm, and this repository checked out locally.
 - A licensed Kaigen SDK for your operating system and CPU architecture, with the
-  version pinned in `player/hzproject.hzt`: currently `0.5.8.003-internal`.
+  version pinned in `player/hzproject.hzt`: currently `0.6.3.001`.
 - The SDK linked as `player/hz`. SDK binaries and licences are not committed.
 - A working native compiler: the Kaigen Windows toolchain, or Xcode Command Line
   Tools on macOS (`xcode-select --install` if they are missing).
@@ -18,8 +18,9 @@ permission. Use this mode for the native character appearance.
   You can also replace individual keys in Studio's Settings. Previewing the model
   does not require provider keys.
 
-This engine pin is an internal build. If the Kaigen installer cannot restore it,
-obtain that SDK version from the team; do not silently substitute another engine
+Install the pinned engine with `kaigen engine install` (it reads the pin) and
+link it with `kaigen restore` from `player/`. If the installer cannot provide it
+for your platform, ask the team; do not silently substitute another engine
 version. The installed Windows SDK does not contain the macOS engine library:
 build the macOS player on a Mac with the corresponding SDK.
 
@@ -61,16 +62,17 @@ npm --prefix frontend ci
 ```
 
 Install Kaigen and activate your licence following its setup instructions. If
-`player/hz` does not already exist, link the matching installed engine:
+`player/hz` does not already exist, link the pinned engine:
 
 ```sh
 cd player
-ln -s "$HOME/Library/Application Support/hz/engines/0.5.8.003-internal" hz
+kaigen restore
 cd ..
 ```
 
-If the SDK is installed elsewhere, use its actual directory as the symlink
-target. The target must contain the macOS `hzbuild` executable and engine libs.
+`kaigen restore` links `player/hz` to the engine installed under
+`~/Library/Application Support/hz/engines/<version>`. The target must contain
+the macOS `hzbuild` executable and engine libs.
 
 Start Studio from the repository root:
 
@@ -155,11 +157,11 @@ conversation card. Interruption clears audio, animation timers and captions.
   `.cache/characters`; Windows paths are normalized before reaching Kaigen.
 - **No speech:** check Settings' key status and the selected character's voice
   configuration. Kaigen preview and provider availability are independent.
-- **WASM:** the engine has a WebAssembly/WebGPU backend, but the current installed
-  internal SDK lacks `lib/wasm/release/hz_engine.a`. A `hzbuild wasm` attempt fails
-  for that missing component; `hzbuild engine add wasm` could not obtain this
-  internal release. A matching component or engine source checkout is required
-  before this player's browser build can be evaluated.
+- **WASM:** the player builds for the browser with WebGPU (`hz/hzbuild wasm run`
+  from `player/`, which needs the engine's `wasm` component). Studio still renders
+  with the native player; see the player README's
+  [WebAssembly section](../player/README.md#build-and-run-in-a-browser-webassembly)
+  for what the browser build does today.
 
 ```sh
 npm --prefix frontend test

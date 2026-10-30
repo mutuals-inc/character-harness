@@ -61,11 +61,11 @@ below build and run the standalone player.
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt`.
-2. Link this folder to the engine you installed (git ignores the link):
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
+2. Link this folder to the pinned engine (git ignores the link):
 
    ```bash
-   ln -s "$HOME/Library/Application Support/hz/engines/<engine-version>" hz
+   kaigen restore
    ```
 
 3. Build and run:
@@ -86,7 +86,7 @@ HARNESS_PLAYER="cd player && hz/hzbuild macos run"
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt`.
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
 2. Link this folder to the pinned engine (git ignores the link):
 
    ```powershell
@@ -113,7 +113,44 @@ executable is `out/windows/debug/CharacterPlayer.exe`. For distribution, use
 the publish build through `release-windows.ps1` below, rather than copying the
 debug executable.
 
-## Settings
+## Build (Linux)
+
+Run these steps from `player/`, after installing and activating Kaigen as above.
+
+```bash
+kaigen restore
+hz/hzbuild linux run
+```
+
+The cook mip-generates and compresses textures on the GPU, so it needs a Vulkan
+device. On a machine without a GPU, Mesa's software Vulkan driver (lavapipe,
+`mesa-vulkan-drivers`) works: point `VK_ICD_FILENAMES` at its `lvp_icd.json`
+for the build and the run. There is no Linux release yet.
+
+## Build and run in a browser (WebAssembly)
+
+The engine's WebAssembly build renders with WebGPU, with the same shaders as
+the desktop player. It needs the engine's `wasm` component
+(`kaigen engine add wasm --version 0.6.3.001`). From `player/`:
+
+```bash
+kaigen restore
+hz/hzbuild wasm run
+```
+
+`hz/hzbuild wasm` alone builds into `out/wasm/debug/` without serving it.
+`run` serves that folder with the cross-origin isolation headers its threads
+need (`Cross-Origin-Opener-Policy: same-origin`,
+`Cross-Origin-Embedder-Policy: require-corp`); any server that sends them
+works. Open it in a browser with WebGPU (Chrome or Edge) and pass the settings
+below as URL parameters, for example
+`/index.html?HARNESS_CHARACTER=foxglove&HARNESS_PREVIEW=emotion:happy`.
+
+In the browser the player shows a cooked-in profile (FoxGlove). It can't import
+a `.vrm` yet, because the import writes its cache to disk. It hasn't been tried
+against the runtime's session socket, so for now use it to preview the character
+(`HARNESS_PREVIEW`) rather than for conversations.
+
 
 The runtime sets the first three when it starts the player.
 
@@ -164,7 +201,7 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `assets/characters/foxglove.hzt`, `assets/foxglove/` | FoxGlove: her profile, model and animations, rig, face, expressions, physics, states and emotes |
 | `assets/mutuals/` | the stage, camera moves, emotions, the gesture set of a cooked-in profile, the lip sync profile, an upper-body mask (empty; the engine expects one) |
 | `assets/vad/` | the voice activity model ([Silero VAD](https://github.com/snakers4/silero-vad), MIT licence) |
-| `shaders/mutuals/` | the toon and outline shaders |
+| `shaders/mutuals/` | the toon and outline shaders (`mtoon.glsl`, `mtoon_outline.glsl`); the engine's VRM importer binds VRM materials to `mtoon.glsl`. In the web build they leave out sky light and fog, to fit WebGPU's 16 textures per shader stage |
 
 ## Release tags and download links
 
