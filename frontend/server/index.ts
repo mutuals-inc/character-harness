@@ -39,6 +39,12 @@ import {
   trustedHost,
 } from "./security.ts";
 import { eventsAfter, instrument } from "./telemetry.ts";
+import {
+  joinWebStage,
+  validStageId,
+  webPlayerFile,
+  webPlayerProfile,
+} from "./web-player.ts";
 
 const directory = path.resolve(import.meta.dirname, "..");
 const port = Number(process.env.FRONTEND_PORT ?? 4173);
@@ -56,7 +62,11 @@ function json(res: ServerResponse, data: unknown, status = 200) {
   res.end(JSON.stringify(data));
 }
 
-function file(res: ServerResponse, filename: string) {
+function file(
+  res: ServerResponse,
+  filename: string,
+  headers: Record<string, string> = {},
+) {
   if (!existsSync(filename)) {
     res.writeHead(404);
     res.end("Not found");
@@ -77,6 +87,7 @@ function file(res: ServerResponse, filename: string) {
   };
   res.writeHead(200, {
     "content-type": types[path.extname(filename)] ?? "application/octet-stream",
+    ...headers,
   });
   createReadStream(filename)
     .on("error", () => res.destroy())
@@ -122,6 +133,7 @@ async function api(req: IncomingMessage, res: ServerResponse, url: URL) {
       availableExtensions: availableExtensions(),
       character: await describeCharacter(c),
       hooks: HOOKS,
+      webPlayer: webPlayerProfile(c.rig),
     });
   }
   if (url.pathname === "/api/extensions/import" && req.method === "POST") {
@@ -261,6 +273,16 @@ const server = createServer(async (req, res) => {
     );
   try {
     if (url.pathname.startsWith("/api/")) return await api(req, res, url);
+    if (url.pathname === "/web-player") {
+      res.writeHead(308, { location: `/web-player/${url.search}` });
+      return res.end();
+    }
+    if (url.pathname.startsWith("/web-player/")) {
+      const found = webPlayerFile(url.pathname);
+      if (!found) return json(res, { error: "Not found." }, 404);
+      res.removeHeader("X-Frame-Options");
+      return file(res, found.file, found.headers);
+    }
     if (!production)
       return vite!.middlewares(req, res, () => {
         res.writeHead(404);
@@ -308,8 +330,26 @@ const sessions = new WebSocketServer({
   maxPayload: 4 * 1024 * 1024,
 });
 
+const webStages = new WebSocketServer({ noServer: true, maxPayload: 8192 });
+
 server.on("upgrade", (req, socket, head) => {
   const url = new URL(req.url ?? "/", `http://${req.headers.host}`);
+  if (url.pathname === "/web-stage") {
+    const id = url.searchParams.get("id");
+    const role = url.searchParams.get("role");
+    if (
+      !trustedHost(req, port) ||
+      !sameOrigin(req) ||
+      !authenticated(req, secret) ||
+      !validStageId(id) ||
+      (role !== "page" && role !== "player")
+    ) {
+      socket.destroy();
+      return;
+    }
+    webStages.handleUpgrade(req, socket, head, (ws) => joinWebStage(ws, id, role));
+    return;
+  }
   if (url.pathname !== "/studio-session") return; // Vite owns its own HMR upgrade.
   if (
     !trustedHost(req, port) ||
@@ -364,6 +404,7 @@ server.listen(port, "127.0.0.1", () =>
 );
 async function shutdown() {
   for (const ws of sessions.clients) ws.close();
+  for (const ws of webStages.clients) ws.close();
   await vite?.close();
   server.close();
 }

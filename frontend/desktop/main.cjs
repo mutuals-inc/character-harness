@@ -6,7 +6,7 @@ const { existsSync, mkdirSync, openSync, closeSync } = require('node:fs');
 const path = require('node:path');
 const { WebSocketServer } = require('ws');
 const { playerExecutable, childEnvironment } = require('./platform.cjs');
-const {validFrame, stageState, MAX_FRAME_BYTES} = require('./protocol.cjs');
+const {validFrame, stageState, stageCue, MAX_FRAME_BYTES} = require('./protocol.cjs');
 
 app.setName('Mutuals Character Studio');
 app.setPath('userData',path.join(app.getPath('appData'),'Mutuals Character Studio'));
@@ -103,9 +103,7 @@ async function start() {
   });
   ipcMain.on('native-stage:cue',(event,value)=>{
     if(!trusted(event)||!value)return;
-    const safe={t:'cue'};
-    for(const key of ['emotion','gesture','camera','talk'])if(typeof value[key]==='string'&&value[key].length<=64)safe[key]=value[key];
-    send(safe);
+    send(stageCue(value));
   });
   await window.loadURL(origin);window.show();
 }
