@@ -21,4 +21,11 @@ function stageState(value) {
   };
 }
 
-module.exports = {validFrame, stageState, MAX_FRAME_BYTES};
+function stageCue(value) {
+  const safe = {t:'cue'};
+  for (const key of ['emotion','gesture','camera','talk'])
+    if (typeof value[key] === 'string' && value[key].length <= 64) safe[key] = value[key];
+  return safe;
+}
+
+module.exports = {validFrame, stageState, stageCue, MAX_FRAME_BYTES};

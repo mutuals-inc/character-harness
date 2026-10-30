@@ -19,7 +19,8 @@
     "test": "node --test \"runtime/test/*.test.ts\"",
     "typecheck": "tsc -p runtime",
     "desktop": "npm --prefix frontend run desktop",
-    "desktop:prepare": "npm --prefix frontend run desktop:prepare"
+    "desktop:prepare": "npm --prefix frontend run desktop:prepare",
+    "web-player": "npm --prefix frontend run web-player --"
   },
   "dependencies": {
     "ws": "^8.22.0",

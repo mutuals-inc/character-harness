@@ -1,0 +1,31 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <title>Kaigen web player</title>
+    <style>
+      html, body { margin: 0; height: 100%; overflow: hidden; background: transparent; }
+      #canvas { display: block; width: 100%; height: 100%; }
+    </style>
+  </head>
+  <body>
+    <canvas id="canvas"></canvas>
+    <!-- Studio opens this page in its stage. Settings come from the URL, as
+         for any web build of the player; once it runs, the player connects
+         back to Studio, and a failure before or after that is told to Studio. -->
+    <script type="module">
+      const tell = (message) => parent.postMessage({ t: "web-player", ...message }, location.origin);
+      async function start() {
+        if (!crossOriginIsolated)
+          return tell({ error: "This browser can't isolate the web player (it needs a recent Chrome or Edge)." });
+        const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
+        if (!adapter) return tell({ error: "WebGPU is unavailable in this browser." });
+        const { createGame } = await import("./main.js");
+        const game = createGame({ canvas: document.getElementById("canvas"), allowFullscreen: false });
+        game.oncrash = (message) => tell({ error: `The web player stopped: ${message || "it crashed"}.` });
+        game.ready.catch((error) => tell({ error: `The web player could not start (${error?.message ?? error}).` }));
+      }
+      start().catch((error) => tell({ error: `The web player could not start (${error?.message ?? error}).` }));
+    </script>
+  </body>
+</html>

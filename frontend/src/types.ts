@@ -86,6 +86,8 @@ export interface Bootstrap {
   availableExtensions: AvailableExtension[];
   character: CharacterInfo;
   hooks: string[];
+  // the profile the Kaigen web player shows for this character, when it can
+  webPlayer: string | null;
 }
 export interface Settings {
   inputDevice: string;

@@ -10,7 +10,8 @@
     "start": "node server/index.ts --production",
     "test": "node --test --test-concurrency=1 test/*.test.ts",
     "desktop": "node desktop/prepare.mjs && electron desktop/main.cjs",
-    "desktop:prepare": "node desktop/prepare.mjs"
+    "desktop:prepare": "node desktop/prepare.mjs",
+    "web-player": "node scripts/web-player.ts"
   },
   "dependencies": {
     "@pixiv/three-vrm": "^3.4.4",

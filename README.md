@@ -60,7 +60,9 @@ To let the character play a game built with [neuro-sdk](https://github.com/Vedal
 The optional [frontend](frontend/README.md) puts the animated character, text and
 voice conversation, microphone settings, character editing, extensions and hook
 feedback in one interface. Desktop mode automatically runs Kaigen inside the
-Studio preview, with the native shaders and cloth. Browser mode uses Three.js.
+Studio preview, with the native shaders and cloth. Browser mode uses Kaigen's
+web player when you install it (`npm run web-player -- download`) and the
+browser has WebGPU, and Three.js otherwise.
 
 For the native desktop interface on Windows or macOS, install root and frontend
 dependencies and restore the licensed Kaigen SDK, then run **`npm run desktop`**.
