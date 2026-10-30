@@ -58,6 +58,10 @@
 // the fov the camera moves were authored against; a move's fov is scaled from
 // it to the player's
 #define PLAYER_STAGE_FOV 20.0f
+// a move with its own fov is framed for a landscape stage; on a stage narrower
+// than this aspect it widens to keep this much width, so a portrait close-up
+// still shows the shoulders
+#define PLAYER_CAM_MOVE_MIN_ASPECT 0.75f
 
 // the beat vocabulary: gesture word -> emote, camera word -> framing preset.
 // A cooked-in profile's gestures are this set (FoxGlove's); an imported

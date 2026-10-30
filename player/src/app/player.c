@@ -91,6 +91,7 @@ typedef struct AppState {
   // the camera move from the latest beat: eases cam_cur from cam_from to cam_to
   b32 cam_active;
   PlayerCamMove cam_from, cam_to, cam_cur;
+  b32 cam_to_fit; // cam_to has its own fov, so it widens on a narrow stage
   f32 cam_t, cam_dur;
   u32 cam_curve;
   char url[PLAYER_ENV_MAX];
@@ -543,6 +544,7 @@ hz_internal void player_camera_move(AppState *s, EcsWorld *w, const char *name) 
         .x = m->x,
         .y = m->y,
         .distance = m->distance};
+    s->cam_to_fit = m->fov > 0.0f;
     s->cam_t = 0.0f;
     s->cam_dur = m->transition > 0.0f ? m->transition : 0.6f;
     s->cam_curve = m->curve;
@@ -705,19 +707,37 @@ hz_internal void player_studio_mouth(AppState *s) {
   }
 }
 
-// advances the camera move and returns the framing to apply this frame
-hz_internal PlayerCamMove player_camera_tick(AppState *s, f32 dt) {
+// On a stage narrower than PLAYER_CAM_MOVE_MIN_ASPECT, widens a move's fov to
+// show the width it shows at that aspect, and lowers the camera by as much as
+// the view grows at the character (`reach` away), so the top of the frame, and
+// the head under it, stay put
+hz_internal PlayerCamMove player_camera_fit(PlayerCamMove m, f32 aspect, f32 reach) {
+  if (aspect <= 0.0f || aspect >= PLAYER_CAM_MOVE_MIN_ASPECT)
+    return m;
+  f32 tan_half = m_tanf(m_radians(m.fov) * 0.5f);
+  f32 wide = tan_half * PLAYER_CAM_MOVE_MIN_ASPECT / aspect;
+  m.y -= (reach - m.distance) * (wide - tan_half);
+  m.fov = m_degrees(2.0f * m_atanf(wide));
+  return m;
+}
+
+// advances the camera move and returns the framing to apply this frame, for a
+// stage of this aspect with the character `reach` away
+hz_internal PlayerCamMove player_camera_tick(AppState *s, f32 dt, f32 aspect,
+                                             f32 reach) {
   if (!s->cam_active)
     return (PlayerCamMove){.fov = PLAYER_CAM_FOV};
   s->cam_t += dt;
   f32 a = s->cam_dur > 0.0f ? m_clampf(s->cam_t / s->cam_dur, 0.0f, 1.0f) : 1.0f;
   a = character_ease(s->cam_curve, a);
+  // fitted every frame, so a resized stage reframes
+  PlayerCamMove to = s->cam_to_fit ? player_camera_fit(s->cam_to, aspect, reach)
+                                   : s->cam_to;
   s->cam_cur = (PlayerCamMove){
-      .fov = s->cam_from.fov + (s->cam_to.fov - s->cam_from.fov) * a,
-      .x = s->cam_from.x + (s->cam_to.x - s->cam_from.x) * a,
-      .y = s->cam_from.y + (s->cam_to.y - s->cam_from.y) * a,
-      .distance = s->cam_from.distance +
-                  (s->cam_to.distance - s->cam_from.distance) * a};
+      .fov = s->cam_from.fov + (to.fov - s->cam_from.fov) * a,
+      .x = s->cam_from.x + (to.x - s->cam_from.x) * a,
+      .y = s->cam_from.y + (to.y - s->cam_from.y) * a,
+      .distance = s->cam_from.distance + (to.distance - s->cam_from.distance) * a};
   return s->cam_cur;
 }
 
@@ -1085,17 +1105,19 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   if (cam) {
     if (is_main_thread()) {
       cam->pos.y += state->character.cam_offset_y; // this character's height
-      camera_look_at(cam, (vec3){0.0f,
-                                 PLAYER_CAM_AIM_Y + state->character.cam_offset_y,
-                                 0.0f});
-      PlayerCamMove move = player_camera_tick(state, memory->dt);
+      vec3 aim = {0.0f, PLAYER_CAM_AIM_Y + state->character.cam_offset_y, 0.0f};
+      camera_look_at(cam, aim);
+      u32 view_w = state->studio_frames ? state->studio_width : memory->canvas_width;
+      u32 view_h = state->studio_frames ? state->studio_height : memory->canvas_height;
+      PlayerCamMove move =
+          player_camera_tick(state, memory->dt, view_h ? (f32)view_w / (f32)view_h : 0.0f,
+                             v3_length(v3_sub(aim, cam->pos)));
       cam->fov = move.fov;
       cam->pos = v3_add(cam->pos, v3_scale(quat_rotate(cam->rot, V3_RIGHT), move.x));
       cam->pos = v3_add(cam->pos, v3_scale(quat_rotate(cam->rot, V3_UP), move.y));
       cam->pos = v3_add(cam->pos,
                         v3_scale(quat_rotate(cam->rot, V3_BACK), move.distance));
-      camera_update(cam, state->studio_frames ? state->studio_width : memory->canvas_width,
-                    state->studio_frames ? state->studio_height : memory->canvas_height);
+      camera_update(cam, view_w, view_h);
     }
     EcsSceneSettings *settings =
         ecs_query_get_singleton(EcsSceneSettings, state->scene_settings_query);
