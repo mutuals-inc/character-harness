@@ -6,14 +6,16 @@ const platforms = {
 	"windows-x64": "Windows x64",
 	"macos-arm64": "macOS Apple Silicon",
 	"linux-x64": "Linux x64",
+	"web-wasm": "Web (WebAssembly)",
 };
+const releaseTag = new RegExp(`^v(\\d+)\\.(\\d+)\\.(\\d+)-(${Object.keys(platforms).join("|")})$`);
 
 export function releaseLinks(releases, repository) {
 	if (!/^[\w.-]+\/[\w.-]+$/.test(repository)) throw new Error("Invalid repository");
 	const latest = new Map();
 	for (const release of releases) {
 		if (release.draft) continue;
-		const match = /^v(\d+)\.(\d+)\.(\d+)-(windows-x64|macos-arm64|linux-x64)$/.exec(release.tag_name);
+		const match = releaseTag.exec(release.tag_name);
 		if (!match) continue;
 		const version = match.slice(1, 4).map(Number);
 		const platform = match[4];

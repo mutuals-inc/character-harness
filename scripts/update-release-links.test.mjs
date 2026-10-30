@@ -10,12 +10,18 @@ test("selects the highest version separately for each platform, including previe
 		{ tag_name: "v0.10.0-macos-arm64", draft: true },
 		{ tag_name: "v99.0.0" },
 		{ tag_name: "v0.1.0-linux-x64" },
+		{ tag_name: "v0.1.2-web-wasm", prerelease: true },
+		{ tag_name: "v0.1.10-web-wasm", prerelease: true },
+		{ tag_name: "v0.1.1-web-wasm" },
+		{ tag_name: "v0.2.0-web-gl" },
 	];
 	const links = releaseLinks(releases, "mutuals-inc/character-harness");
 	assert.match(links, /Windows x64 — v0\.10\.0-windows-x64 \(pre-release\)/);
 	assert.match(links, /macOS Apple Silicon — v0\.8\.0-macos-arm64/);
 	assert.match(links, /Linux x64 — v0\.1\.0-linux-x64/);
-	assert.doesNotMatch(links, /v0\.9\.0|v99|v0\.10\.0-macos/);
+	assert.match(links, /Web \(WebAssembly\) — v0\.1\.10-web-wasm \(pre-release\)/);
+	assert.match(links.split("\n").at(-1), /web-wasm/);
+	assert.doesNotMatch(links, /v0\.9\.0|v99|v0\.10\.0-macos|v0\.1\.2-web|v0\.1\.1-web|web-gl/);
 	assert.equal(links, releaseLinks(releases.toReversed(), "mutuals-inc/character-harness"));
 });
 
