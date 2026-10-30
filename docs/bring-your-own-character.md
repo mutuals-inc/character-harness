@@ -7,7 +7,7 @@ Any VRM model (0.x or 1.0) can be a character's body.
 
    ```yaml
    rig:
-     engine: ">=0.5.8"
+     engine: ">=0.6.3"
      model: model.vrm
      animations:
        idle: idle.vrma

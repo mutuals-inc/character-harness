@@ -226,7 +226,7 @@ export async function prepareDemo() {
   manifest.description =
     "A studio rehearsal character with an original comet salute and a small extension you can switch on and off.";
   manifest.rig = {
-    engine: ">=0.5.8",
+    engine: ">=0.6.3",
     model: "../../.cache/studio-demo/foxglove-studio.vrm",
     animations: {
       idle: ["idle_breathing", "idle_listening"],
