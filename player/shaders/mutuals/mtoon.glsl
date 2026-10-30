@@ -69,7 +69,7 @@ void main() {
     float camera_dist = length(toward_camera);
     vec3 nearer = position_ws.xyz +
                   toward_camera * (min(push, 0.5 * camera_dist) / max(camera_dist, 1e-4));
-    vec4 nearer_clip = hz_scene.view_proj * vec4(nearer, 1.0);
+    vec4 nearer_clip = hz_instance_clip(v, vec4(nearer, 1.0));
     gl_Position.z = nearer_clip.z / nearer_clip.w * gl_Position.w;
 #endif
     v_world_pos = position_ws.xyz;

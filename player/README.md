@@ -151,6 +151,7 @@ a `.vrm` yet, because the import writes its cache to disk. It hasn't been tried
 against the runtime's session socket, so for now use it to preview the character
 (`HARNESS_PREVIEW`) rather than for conversations.
 
+## Settings
 
 The runtime sets the first three when it starts the player.
 

@@ -59,11 +59,6 @@
 // it to the player's
 #define PLAYER_STAGE_FOV 20.0f
 
-// the stage's lights keep the unitless values they had before lights were
-// physical; the EV100 whose pre-exposure, 1 / (1.2 x 2^EV100), is 1 shows them
-// as they were
-#define PLAYER_EXPOSURE_EV100 (-0.2630344f)
-
 // the beat vocabulary: gesture word -> emote, camera word -> framing preset.
 // A cooked-in profile's gestures are this set (FoxGlove's); an imported
 // character brings its own.

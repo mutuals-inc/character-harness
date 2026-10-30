@@ -888,7 +888,6 @@ HZ_APP_API void app_init(AppMemory *memory) {
                                       .cascade_size = 4096,
                                       .max_distance = 5.0f},
                        });
-  renderer_set_exposure_ev100(ecs_resource_get_mut(w, RendererState), PLAYER_EXPOSURE_EV100);
   if (state->studio_url[0]) renderer_add_feature(ecs_resource_get_mut(w,RendererState),&(RendererFeatureDesc){
     .name="Studio alpha",.reads=RENDERER_RESOURCE_DEPTH,.user=state,
     .record={[RENDERER_PHASE_AFTER_RESOLVE]=player_studio_resolved},
@@ -1051,7 +1050,8 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   ecs_schedule_single(w, player_submesh_shadow_optout_system);
   ecs_schedule_single(w, player_face_material_resolve_system);
   // the upper-body mask is empty, so the overlay pass changes nothing; skipping
-  // it also avoids 0.6.3's resolve_anim_overlay_system world-arena assert
+  // it avoids 0.6.3's resolve_anim_overlay_system world-arena assert. Turn it
+  // back on once the engine fixes that, before giving the mask any weight
   CharacterScheduleDesc csd = {.no_overlays = true};
   character_schedule_pose(w, &csd);
   ecs_schedule_single(w, light_aim_init_system);

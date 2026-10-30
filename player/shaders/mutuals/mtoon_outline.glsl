@@ -72,7 +72,7 @@ void main() {
     // view_proj's first and second rows (the view part is a pure rotation)
     float scale_x = length(vec3(hz_scene.view_proj[0][0], hz_scene.view_proj[1][0], hz_scene.view_proj[2][0]));
     float scale_y = length(vec3(hz_scene.view_proj[0][1], hz_scene.view_proj[1][1], hz_scene.view_proj[2][1]));
-    vec4 clip = hz_scene.view_proj * position_ws;
+    vec4 clip = hz_instance_clip(v, position_ws);
     vec2 normal_cs = (hz_scene.view_proj * vec4(v_normal, 0.0)).xy;
     vec2 push_dir = dot(normal_cs, normal_cs) > 1e-12 ? normalize(normal_cs) : vec2(0.0);
     float facing_z = normalize((hz_scene.view * vec4(v_normal, 0.0)).xyz).z;
