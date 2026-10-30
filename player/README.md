@@ -4,7 +4,7 @@ The app that shows the character: it renders it, plays its voice, captures the m
 
 Ready-made builds are on this repo's GitHub Releases; using one needs no Kaigen licence. To change the player, you build it yourself, which needs a Kaigen licence.
 
-For either platform, prepare the harness first: install Node 24 or later,
+For any platform, prepare the harness first: install Node 24 or later,
 download the matching harness source release, run `npm install` from its root,
 and copy `.env.example` to `.env`. Fill in the keys your character uses;
 FoxGlove needs `XAI_API_KEY` and `ELEVENLABS_API_KEY`. See the
@@ -52,6 +52,31 @@ The app keeps what it writes, like the cache of imported models and its logs, in
 4. Run `npm.cmd start` from the harness root. It starts the runtime and the
    prebuilt player together. Allow microphone access for desktop apps in Windows
    Settings, then speak first.
+
+## Install a release (Linux)
+
+1. Download `character-player-<version>-linux-x64.tar.gz` and
+   `SHA256SUMS-linux-x64` from the release, and check it
+   (`sha256sum -c SHA256SUMS-linux-x64`).
+2. Extract it somewhere you can write to, like your home folder
+   (`tar -xzf character-player-<version>-linux-x64.tar.gz`), and keep the
+   folder together. The player runs in its own folder and keeps its cache of
+   imported models there (`cooked/vrm/`); its logs go to
+   `~/.local/share/Character Player/`.
+
+   It needs an x86_64 Linux desktop (X11 or Wayland), a Vulkan driver (Mesa's
+   `mesa-vulkan-drivers`, or your GPU vendor's) and a microphone through
+   PulseAudio or PipeWire (`pipewire-pulse`). No Kaigen SDK or licence is
+   needed to run it.
+3. Put this in the harness's `.env`, so `npm start` opens it. Use the extracted
+   player's actual path, keeping both quote levels for the space in its name:
+
+   ```dotenv
+   HARNESS_PLAYER="'/home/you/Apps/character-player-0.1.0-linux-x64/Character Player'"
+   ```
+
+4. Run `npm start` from the harness root. It starts the runtime and the
+   prebuilt player together. Speak first.
 
 ## Build (macOS)
 
@@ -125,7 +150,8 @@ hz/hzbuild linux run
 The cook mip-generates and compresses textures on the GPU, so it needs a Vulkan
 device. On a machine without a GPU, Mesa's software Vulkan driver (lavapipe,
 `mesa-vulkan-drivers`) works: point `VK_ICD_FILENAMES` at its `lvp_icd.json`
-for the build and the run. There is no Linux release yet.
+for the build and the run. Studio's desktop mode doesn't run on Linux yet
+(`../docs/desktop-studio.md`).
 
 ## Build and run in a browser (WebAssembly)
 
@@ -191,6 +217,8 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | Path | What |
 |---|---|
 | `hzproject.hzt` | the project: name, folders, engine version, and the app's name, bundle id and version for a release |
+| `release-linux.sh` | builds a Linux release from a tag, packages it as a `.tar.gz`, and attaches it to a draft GitHub release |
+| `release-windows.ps1` | builds a Windows release from a tag, packages it as a `.zip`, and attaches it to a draft GitHub release |
 | `release-macos.sh`, `macos.entitlements` | builds a release from a tag, signs it (ad hoc, or with a Developer ID and notarized), and attaches it to a draft GitHub release; the entitlements let the app use the mic |
 | `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera |
 | `src/app/player_vrm.c`, `.h` | runtime VRM import and caching: clips, face, rig and the generated character profile |
@@ -207,10 +235,9 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 ## Release tags and download links
 
 Use one tag and GitHub release per version, OS and architecture:
-`v0.1.0-windows-x64` and `v0.1.0-macos-arm64` can both release app version
-`0.1.0`, independently and from different commits. Reserve
-`v0.1.0-linux-x64` for a future Linux build; there is no Linux player release
-script yet. The platform suffix is omitted from the app's product version.
+`v0.1.0-windows-x64`, `v0.1.0-macos-arm64` and `v0.1.0-linux-x64` can all
+release app version `0.1.0`, independently and from different commits. The
+platform suffix is omitted from the app's product version.
 
 Create and push the tag on the commit you will build, then check it out before
 running the platform's release script. For example:
@@ -247,6 +274,36 @@ MACOS_SIGNING_IDENTITY="Developer ID Application: <name> (<team id>)" MACOS_NOTA
 ```
 
 Either way, review the draft and publish it. CI doesn't build the player, so releases are made this way.
+
+## Releasing (Linux)
+
+From a clean checkout of a `vX.Y.Z-linux-x64` tag pushed to GitHub, on x86_64
+Linux with the Kaigen SDK linked at `player/hz` and your licence activated:
+
+```bash
+player/release-linux.sh vX.Y.Z-linux-x64
+```
+
+The cook needs a Vulkan device; without a GPU, point `VK_ICD_FILENAMES` at
+lavapipe's `lvp_icd.json` (see "Build (Linux)"). The script sets the product
+version from the tag for the build only, removes cached VRM imports and old
+publish output, and runs `hz/hzbuild linux publish`. It packages the published
+executable and its cooked assets (without the web build's `.br` files), the
+licences and a README into:
+
+```text
+player/out/release/linux-x64/
+  character-player-0.1.0-linux-x64/
+  character-player-0.1.0-linux-x64.tar.gz
+  SHA256SUMS-linux-x64
+```
+
+Debug symbols, object files and the engine's release entry stay out of it, and
+the script stops if anything in the package names a path on the build machine.
+It then creates a draft release with the files and notes on running the full
+harness; a rerun replaces the files on that draft, and a published release is
+never changed. `--no-release` stops after packaging. Review the draft and
+publish it.
 
 ## Releasing (Windows)
 
