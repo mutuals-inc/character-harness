@@ -1,8 +1,9 @@
 # Mutuals Character Studio
 
 A minimal local frontend for the character harness. Browser mode renders the
-character with Three.js; desktop mode automatically starts the native Kaigen
-renderer. Conversation uses the
+character with Kaigen's web player when it is installed and the browser has
+WebGPU, and with Three.js otherwise; desktop mode automatically starts the
+native Kaigen renderer. Conversation uses the
 existing runtime and its public session and extension contracts.
 
 ## Run
@@ -57,6 +58,44 @@ npm start
 Stop the dev server before starting the built version. `FRONTEND_PORT` changes
 the default port. The server only listens on loopback. Use one hostname
 consistently because authentication is scoped to that origin.
+
+## Kaigen in the browser
+
+Browser mode can show FoxGlove with the player's WebAssembly build: Kaigen's
+own renderer, toon and outline shaders and cloth, instead of Three.js. The
+build is licensed engine output, so it isn't in git. From the repository root,
+install a published `vX.Y.Z-web-wasm` release (about 110 MB; checked against
+its SHA256SUMS):
+
+```sh
+npm run web-player -- download
+```
+
+With the Kaigen SDK, build it yourself instead: `hz/hzbuild wasm publish` in
+`player/`, then `npm run web-player -- copy`. Either one fills
+`.cache/web-player/`; reload Studio. `WEB_PLAYER_DIR` serves another folder and
+`WEB_PLAYER=off` turns it off.
+
+It needs WebGPU and a recent Chrome or Edge. The player's threads need
+cross-origin isolation, so the server gives it its own iframe under
+`/web-player/` with `Document-Isolation-Policy` (and COOP/COEP); the Studio page
+keeps its headers, and its fonts, images, audio and sockets are unaffected.
+
+Studio uses Three.js, as before, when the web player isn't installed, the
+character has a `.vrm` model (the web player only has the profiles cooked into
+it), the browser has no WebGPU or can't isolate the iframe, or the player fails
+to start within a minute. The reason is logged to the console. Add
+`?stage=three` to the URL to use Three.js anyway, or `?stage=wasm` to use the
+web player and see its error instead of falling back.
+
+The web player gets what the desktop app sends the native player, through the
+server's `/web-stage` socket: emotions, gestures, talking styles and camera moves
+from the conversation's beats, and the talking state and mouth level from the
+speech Studio plays (audio energy, as in Three.js). The conversation, microphone
+and voice stay in Studio, so they work as before. It doesn't use Studio's
+backgrounds (the engine's canvas is opaque; Kaigen's stage shows behind her),
+the stage can't be dragged or zoomed, and its builds report usage events to
+Kaigen (`api.kaigen3d.com`), as the engine's published builds do.
 
 ## What works
 
@@ -121,7 +160,8 @@ separate pages. On phones the toggle hides or reveals a compact icon rail.
   conversation are available from Studio.
 
 The UI uses vanilla TypeScript and native HTML controls, with one stylesheet in
-`src/styles.css`. Vite builds it; Three.js and three-vrm render the character.
+`src/styles.css`. Vite builds it; the Kaigen web player, or Three.js and
+three-vrm, render the character.
 No UI framework or component library is used.
 
 Start session connects to the runtime. Sending a message or speaking uses the
@@ -146,16 +186,13 @@ before saving. Extension changes persist in the character manifest. Enabled entr
 
 ## Current limits
 
-- **Browser mode** uses Three.js, not Kaigen compiled into a web view. It uses
-  the same model and animation data. Kaigen's custom shading, cloth and certain
+- **Browser mode** uses Kaigen's web player for FoxGlove when it is installed
+  and the browser supports it (see "Kaigen in the browser"); it can't import a
+  `.vrm`, so imported characters stay on Three.js. The Three.js stage uses the
+  same model and animation data, but Kaigen's custom shading, cloth and certain
   expression effects are not reproduced exactly. Standard VRM spring bones are
   handled by the VRM loader when present. Profile joints hidden by the native
-  rig are also hidden in the browser. The player now also builds for the
-  browser with WebGPU and Kaigen's own shaders
-  ([player README](../player/README.md#build-and-run-in-a-browser-webassembly)).
-  Before it can replace Three.js here, this server has to send cross-origin
-  isolation headers, the licensed build has to be supplied (it isn't in the
-  repository or CI), and imports, mic and the session socket have to work in it.
+  rig are also hidden in the browser.
 - Desktop mode uses the actual native Kaigen renderer. Its application-level
   depth mask has the partial-transparency/bloom limits described above; macOS
   runtime verification remains pending.
@@ -185,7 +222,9 @@ before saving. Extension changes persist in the character manifest. Enabled entr
 - `server/security.ts`: local host, same-origin and HttpOnly session checks
 - `server/telemetry.ts`: observes hooks through the extension contract
 - `server/index.ts`: local HTTP and WebSocket host; reuses `runSession`
-- `src/stage/`: renderer, animation and expressions
+- `server/web-player.ts`, `server/web-player.html`: the web player's files, headers, iframe page and `/web-stage` relay
+- `scripts/web-player.ts`: `npm run web-player`, which installs the web player
+- `src/stage/`: the Three.js renderer, animation and expressions; the native and web player stages; `choose.ts` picks one
 - `src/audio/`: microphone capture and streamed playback
 - `src/session.ts`: browser side of the existing session protocol
 - `src/ui/`: small view templates

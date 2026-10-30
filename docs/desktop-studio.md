@@ -105,8 +105,9 @@ not a claim that signed macOS/Windows installers have been produced.
 - Studio uses `http://127.0.0.1:4174` internally. This stable origin keeps its
   browser preferences and current-character selection across restarts.
 - The browser-only interface remains available with `npm run frontend` at
-  `http://127.0.0.1:4173`, using Three.js. Opening that URL does not switch it to
-  the native renderer.
+  `http://127.0.0.1:4173`, using Kaigen's web player when it is installed and
+  Three.js otherwise ([Kaigen in the browser](../frontend/README.md#kaigen-in-the-browser)).
+  Opening that URL does not switch it to the native renderer.
 
 If port 4174 is already occupied, close the other process or choose another port:
 
@@ -162,10 +163,9 @@ conversation card. Interruption clears audio, animation timers and captions.
 - **No speech:** check Settings' key status and the selected character's voice
   configuration. Kaigen preview and provider availability are independent.
 - **WASM:** the player builds for the browser with WebGPU (`hz/hzbuild wasm run`
-  from `player/`, which needs the engine's `wasm` component). Studio still renders
-  with the native player; see the player README's
-  [WebAssembly section](../player/README.md#build-and-run-in-a-browser-webassembly)
-  for what the browser build does today.
+  from `player/`, which needs the engine's `wasm` component). Desktop Studio
+  renders with the native player; Studio in a browser can use the web build
+  ([player README](../player/README.md#studio-in-a-browser-webassembly)).
 
 ```sh
 npm --prefix frontend test

@@ -141,7 +141,7 @@ From a matching character-harness source checkout, run from the repo root:
   npm run web-player -- download $tag
 
 or extract this folder's contents into .cache/web-player/ yourself. Then
-start Studio (npm run frontend) and open it in Chrome or Edge 137 or later,
+start Studio (npm run frontend) and open it in a recent Chrome or Edge,
 with WebGPU.
 
 Built from $tag ($commit), Kaigen $engine_version.
@@ -204,7 +204,7 @@ npm run web-player -- download $tag
 \`\`\`
 
    It downloads **$(basename "$tarball")**, checks it against **SHA256SUMS-web-wasm** and unpacks it into \`.cache/web-player/\`.
-3. Run \`npm run frontend\` and open http://127.0.0.1:4173 in Chrome or Edge 137 or later, with WebGPU.
+3. Run \`npm run frontend\` and open http://127.0.0.1:4173 in a recent Chrome or Edge, with WebGPU.
 
 Without WebGPU, in other browsers, or for characters with a \`.vrm\` model, Studio uses three.js as before. Conversations need Node and provider API keys; provider usage is billed to your accounts.
 

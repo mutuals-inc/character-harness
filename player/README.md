@@ -173,9 +173,35 @@ below as URL parameters, for example
 `/index.html?HARNESS_CHARACTER=foxglove&HARNESS_PREVIEW=emotion:happy`.
 
 In the browser the player shows a cooked-in profile (FoxGlove). It can't import
-a `.vrm` yet, because the import writes its cache to disk. It hasn't been tried
-against the runtime's session socket, so for now use it to preview the character
-(`HARNESS_PREVIEW`) rather than for conversations.
+a `.vrm` yet, because the import writes its cache to disk. On its own it hasn't
+been tried against the runtime's session socket, so use it to preview the
+character (`HARNESS_PREVIEW`); for conversations, use it in Studio (below).
+
+## Studio in a browser (WebAssembly)
+
+Studio's Browser mode shows FoxGlove with the web build when it is installed and
+the browser has WebGPU (a recent Chrome or Edge), and with three.js
+otherwise. Studio serves it from `.cache/web-player/` with the isolation headers
+its threads need, and drives it like the desktop app drives the native player:
+over `HARNESS_STUDIO_URL` it gets emotions, gestures, talking styles, camera
+moves and the mouth level of the speech Studio plays. The conversation, mic and
+voice stay in Studio. See the [Studio README](../frontend/README.md#kaigen-in-the-browser).
+
+Install it from the repo root, from a `vX.Y.Z-web-wasm` release:
+
+```bash
+npm run web-player -- download
+```
+
+or from your own build, after `hz/hzbuild wasm publish` in `player/`:
+
+```bash
+npm run web-player -- copy
+```
+
+`WEB_PLAYER_DIR` points Studio at another folder, such as `out/wasm/debug/`.
+In Studio the web build draws Kaigen's stage behind her: a WebGPU canvas from the
+engine is always opaque, so Studio's backgrounds don't apply to it.
 
 ## Settings
 
@@ -219,8 +245,9 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `hzproject.hzt` | the project: name, folders, engine version, and the app's name, bundle id and version for a release |
 | `release-linux.sh` | builds a Linux release from a tag, packages it as a `.tar.gz`, and attaches it to a draft GitHub release |
 | `release-windows.ps1` | builds a Windows release from a tag, packages it as a `.zip`, and attaches it to a draft GitHub release |
+| `release-web.sh` | builds the web player from a tag, packages it as a `.tar.gz` for Studio, and attaches it to a draft GitHub release |
 | `release-macos.sh`, `macos.entitlements` | builds a release from a tag, signs it (ad hoc, or with a Developer ID and notarized), and attaches it to a draft GitHub release; the entitlements let the app use the mic |
-| `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera |
+| `src/app/player.c`, `player.h` | the app: init, frame loop, mic, beats, camera, and the Studio link (`HARNESS_STUDIO_URL`) |
 | `src/app/player_vrm.c`, `.h` | runtime VRM import and caching: clips, face, rig and the generated character profile |
 | `src/app/player_offers.c`, `.h` | the offers link: the voice's status out, offered turns in |
 | `src/app/player_json.c`, `.h` | a small JSON reader for the VRM extensions and the runtime's clip table |
@@ -237,7 +264,9 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 Use one tag and GitHub release per version, OS and architecture:
 `v0.1.0-windows-x64`, `v0.1.0-macos-arm64` and `v0.1.0-linux-x64` can all
 release app version `0.1.0`, independently and from different commits. The
-platform suffix is omitted from the app's product version.
+platform suffix is omitted from the app's product version. The web player uses
+`v0.1.0-web-wasm`; it isn't in the README's download links, because
+`npm run web-player -- download` finds it.
 
 Create and push the tag on the commit you will build, then check it out before
 running the platform's release script. For example:
@@ -304,6 +333,36 @@ It then creates a draft release with the files and notes on running the full
 harness; a rerun replaces the files on that draft, and a published release is
 never changed. `--no-release` stops after packaging. Review the draft and
 publish it.
+
+## Releasing (web)
+
+From a clean checkout of a `vX.Y.Z-web-wasm` tag pushed to GitHub, on Linux with
+the Kaigen SDK and its `wasm` component linked at `player/hz` and your licence
+activated:
+
+```bash
+player/release-web.sh vX.Y.Z-web-wasm
+```
+
+The cook needs a Vulkan device, as for Linux. The script sets the product
+version from the tag for the build only, removes cached VRM imports and old
+publish output, and runs `hz/hzbuild wasm publish`. It packages the player's
+scripts, `game.wasm.br` and its cooked assets (without the native `.zst` files,
+the engine's test page and its static-host headers), the licences and a README
+into:
+
+```text
+player/out/release/web-wasm/
+  character-player-0.1.0-web-wasm/
+  character-player-0.1.0-web-wasm.tar.gz
+  SHA256SUMS-web-wasm
+```
+
+It stops if anything in the package, the brotli files unpacked included, names a
+path on the build machine or holds a Kaigen licence key. It then creates a draft
+release; a rerun replaces the files on that draft, and a published release is
+never changed. `--no-release` stops after packaging. Review the draft and
+publish it; `npm run web-player -- download` takes the highest published version.
 
 ## Releasing (Windows)
 
