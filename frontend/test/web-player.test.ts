@@ -5,6 +5,7 @@ import { mkdtempSync, mkdirSync, readFileSync, writeFileSync } from "node:fs";
 import { request } from "node:http";
 import { tmpdir } from "node:os";
 import path from "node:path";
+import { gzipSync } from "node:zlib";
 import WebSocket from "ws";
 import { chooseStage } from "../src/stage/choose.ts";
 import {
@@ -118,6 +119,15 @@ test("web player releases are picked by version, checked and unpacked safely", a
   await extractTarGz(tarball, into);
   assert.equal(readFileSync(path.join(into, "main.js"), "utf8"), "main");
   assert.deepEqual(readFileSync(path.join(into, long)), Buffer.alloc(1500, 7));
+
+  // a damaged or cut-short archive stops
+  execFileSync("tar", ["-C", work, "-cf", path.join(work, "plain.tar"), "character-player-0.1.0-web-wasm"]);
+  const plain = readFileSync(path.join(work, "plain.tar"));
+  writeFileSync(path.join(work, "truncated.tar.gz"), gzipSync(plain.subarray(0, 1024)));
+  await assert.rejects(extractTarGz(path.join(work, "truncated.tar.gz"), path.join(work, "truncated-out")), /truncated/);
+  plain[100] ^= 0xff; // the first header's mode, under its checksum
+  writeFileSync(path.join(work, "damaged.tar.gz"), gzipSync(plain));
+  await assert.rejects(extractTarGz(path.join(work, "damaged.tar.gz"), path.join(work, "damaged-out")), /damaged/);
 
   // links never come out of an archive
   const linked = path.join(work, "linked");

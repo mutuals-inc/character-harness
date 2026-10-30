@@ -199,9 +199,10 @@ or from your own build, after `hz/hzbuild wasm publish` in `player/`:
 npm run web-player -- copy
 ```
 
-`WEB_PLAYER_DIR` points Studio at another folder, such as `out/wasm/debug/`.
-In Studio the web build draws Kaigen's stage behind her: a WebGPU canvas from the
-engine is always opaque, so Studio's backgrounds don't apply to it.
+`WEB_PLAYER_DIR` points Studio at another folder, from the repo root, such as
+`player/out/wasm/debug/`. In Studio the web build draws Kaigen's stage behind
+her: a WebGPU canvas from the engine is always opaque, so Studio's backgrounds
+don't apply to it.
 
 ## Settings
 

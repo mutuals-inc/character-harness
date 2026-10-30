@@ -11,8 +11,8 @@
   <body>
     <canvas id="canvas"></canvas>
     <!-- Studio opens this page in its stage. Settings come from the URL, as
-         for any web build of the player; the frame is drawn with a clear
-         background so Studio's shows around the character. -->
+         for any web build of the player; once it runs, the player connects
+         back to Studio, and a failure before or after that is told to Studio. -->
     <script type="module">
       const tell = (message) => parent.postMessage({ t: "web-player", ...message }, location.origin);
       async function start() {
@@ -23,7 +23,7 @@
         const { createGame } = await import("./main.js");
         const game = createGame({ canvas: document.getElementById("canvas"), allowFullscreen: false });
         game.oncrash = (message) => tell({ error: `The web player stopped: ${message || "it crashed"}.` });
-        tell({ started: true });
+        game.ready.catch((error) => tell({ error: `The web player could not start (${error?.message ?? error}).` }));
       }
       start().catch((error) => tell({ error: `The web player could not start (${error?.message ?? error}).` }));
     </script>

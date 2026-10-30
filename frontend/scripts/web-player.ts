@@ -30,6 +30,7 @@ import { ROOT } from "../server/paths.ts";
 import { WEB_PLAYER_DIR, webPlayerReady } from "../server/web-player.ts";
 
 const REPOSITORY = process.env.GITHUB_REPOSITORY ?? "mutuals-inc/character-harness";
+if (!/^[\w.-]+\/[\w.-]+$/.test(REPOSITORY)) throw new Error("Invalid GITHUB_REPOSITORY.");
 const TAG = /^v(\d+)\.(\d+)\.(\d+)-web-wasm$/;
 
 interface Release {
@@ -80,7 +81,16 @@ export function archivePath(name: string): string | null {
 // Unpacks a .tar.gz with one top folder into `into`, streaming. Only files and
 // folders are taken; a link or any other entry stops it.
 export async function extractTarGz(file: string, into: string) {
-  const chunks = createReadStream(file).pipe(createGunzip())[Symbol.asyncIterator]();
+  const input = createReadStream(file);
+  try {
+    await unpack(input.pipe(createGunzip()), into);
+  } finally {
+    input.destroy();
+  }
+}
+
+async function unpack(stream: AsyncIterable<Buffer>, into: string) {
+  const chunks = stream[Symbol.asyncIterator]();
   let pending = Buffer.alloc(0);
   async function read(size: number): Promise<Buffer> {
     while (pending.length < size) {
@@ -228,9 +238,9 @@ function copy(from: string | undefined, target: string) {
   }
   const next = `${target}.new`;
   rmSync(next, { recursive: true, force: true });
-  // the engine's test page, static-host headers, native-only files and the
-  // player's cache of imported models aren't needed
-  const skip = new Set(["index.html", "_headers", path.join("cooked", "vrm"), path.join("cooked", "cook_deps")]);
+  // as in a release: no engine test page, static-host headers, native-only
+  // files, engine sample assets or the player's cache of imported models
+  const skip = new Set(["index.html", "_headers", ...["vrm", "cook_deps", "gameplay_blocks"].map((name) => path.join("cooked", name))]);
   cpSync(source, next, {
     recursive: true,
     dereference: true,

@@ -20,6 +20,10 @@ export class WebPlayerStage {
   private iframe = document.createElement("iframe");
   private settle: { resolve(): void; reject(error: Error): void } | null = null;
   private timer = 0;
+  private failed = false;
+  private sentState = "";
+  // called when the player stops after it has started
+  onfail: ((error: Error) => void) | null = null;
 
   constructor(container: HTMLElement) {
     this.container = container;
@@ -86,9 +90,11 @@ export class WebPlayerStage {
     this.settle = null;
   }
   private fail(error: Error) {
-    if (this.disposed || !this.settle) return;
+    if (this.disposed || this.failed) return;
+    this.failed = true;
     clearTimeout(this.timer);
-    this.settle.reject(error);
+    if (this.settle) this.settle.reject(error);
+    else this.onfail?.(error);
     this.settle = null;
   }
   private onMessage = (event: MessageEvent) => {
@@ -103,18 +109,23 @@ export class WebPlayerStage {
   private send(message: object) {
     if (this.socket.readyState === WebSocket.OPEN) this.socket.send(JSON.stringify(message));
   }
+  // the mouth and talking state, when they change and at least every 0.2 s:
+  // the player lets them go after 0.5 s without one. It draws at its canvas's
+  // size, so the size the desktop app sends isn't needed
   private tick = () => {
     if (this.disposed) return;
     const now = performance.now();
-    if (now - this.lastStateAt >= 33) {
-      const rect = this.container.getBoundingClientRect();
-      this.send({
-        t: "state",
-        width: rect.width,
-        height: rect.height,
-        mouth: Math.min(1, output.level() * 5),
-        talking: output.playing,
-      });
+    const state = JSON.stringify({
+      t: "state",
+      mouth: Math.round(Math.min(1, output.level() * 5) * 100) / 100,
+      talking: output.playing,
+    });
+    if (
+      now - this.lastStateAt >= 33 &&
+      (state !== this.sentState || now - this.lastStateAt >= 200)
+    ) {
+      if (this.socket.readyState === WebSocket.OPEN) this.socket.send(state);
+      this.sentState = state;
       this.lastStateAt = now;
     }
     this.frame = requestAnimationFrame(this.tick);

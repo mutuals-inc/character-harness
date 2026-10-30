@@ -13,8 +13,10 @@ const { stageState, stageCue } = createRequire(import.meta.url)(
   stageCue(value: object): object;
 };
 
+// a relative WEB_PLAYER_DIR is from the repository root
 export const WEB_PLAYER_DIR = path.resolve(
-  process.env.WEB_PLAYER_DIR || path.join(ROOT, ".cache/web-player"),
+  ROOT,
+  process.env.WEB_PLAYER_DIR || ".cache/web-player",
 );
 // the page the iframe opens; the build's own index.html is a test bootstrap
 export const WEB_PLAYER_PAGE = path.join(import.meta.dirname, "web-player.html");

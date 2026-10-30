@@ -100,9 +100,10 @@ async function boot(
   if (choice.kind === "web-player") {
     const web = new WebPlayerStage($("#stage-canvas"));
     stage = web;
-    web.load(data.webPlayer!).catch((error: Error) => {
+    const fallBack = (error: Error) => {
       if (stage !== web) return;
       if (choice.forced) {
+        $("#stage-loading").hidden = false;
         $("#stage-loading").textContent = error.message;
         return;
       }
@@ -112,7 +113,9 @@ async function boot(
       web.dispose();
       stage = null;
       void startStage(data);
-    });
+    };
+    web.onfail = fallBack;
+    web.load(data.webPlayer!).catch(fallBack);
   } else await startStage(data);
   setView(view);
   renderSessionState();
