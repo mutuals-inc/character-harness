@@ -60,6 +60,9 @@ if $create_release; then
 	fi
 fi
 [ -x hz/hzbuild ] || { echo "player/hz is not linked to a Kaigen SDK (see player/README.md)" >&2; exit 1; }
+for tool in python3 readelf sha256sum; do
+	command -v "$tool" >/dev/null || { echo "$tool is not installed" >&2; exit 1; }
+done
 engine_version="$(sed -n 's/^engine_version //p' hzproject.hzt)"
 
 # The version goes into hzproject.hzt only for this build; the file is put
@@ -104,14 +107,15 @@ if [ -n "$unknown" ]; then
 	echo "$unknown" >&2
 	exit 1
 fi
-if readelf -S "$exe" | grep -q ' \.debug_'; then
+sections="$(readelf -SW "$exe")"
+if grep -q ' \.debug_' <<<"$sections"; then
 	echo "$exe has debug sections; a publish build should not" >&2
 	exit 1
 fi
-# the publish build normally copies the cooked assets beside the executable
+# the publish build copies the cooked assets beside the executable; the
+# player's own cooked/ may hold leftovers from development, so it isn't used
 cooked="$bundle/cooked"
-[ -d "$cooked" ] || cooked=cooked
-[ -f "$cooked/catalog.hza" ] || { echo "the publish build left no cooked/catalog.hza" >&2; exit 1; }
+[ -f "$cooked/catalog.hza" ] || { echo "the publish build left no cooked/catalog.hza beside the executable" >&2; exit 1; }
 # a link would ship pointing at this machine
 if [ -n "$(find "$cooked" -type l -print -quit)" ]; then
 	echo "$cooked has symlinks; remove them before a release" >&2
@@ -159,7 +163,11 @@ Then speak first.
 Built from $tag ($commit), Kaigen $engine_version.
 EOF
 # nothing in the package may point back at this machine
-leaks="$(grep -rlaF -e "$repo_root" -e "$(readlink -f hz)" -e "$HOME/" "$stage" || true)"
+here=(-e "$repo_root" -e "$(readlink -f hz)")
+[ -n "${HOME:-}" ] && [ "$HOME" != / ] && here+=(-e "$HOME/")
+# grep finds nothing: 1; fails: 2
+leaks="$(grep -rlaF "${here[@]}" "$stage")" && status=0 || status=$?
+[ "$status" -le 1 ] || exit 1
 if [ -n "$leaks" ]; then
 	echo "these files name paths on this machine; check them:" >&2
 	echo "$leaks" >&2
