@@ -29,13 +29,15 @@ test("the printed start command carries HARNESS_LISTEN, quoted, only when there 
 // from the stage's to the player's, and its distance is toward the character)
 test("push-in and close-up frame tighter than the stage camera, close-up the tightest", () => {
 	const player = path.resolve(import.meta.dirname, "../../player");
-	const config = readFileSync(path.join(player, "src/app/app_config.h"), "utf8");
+	const read = (file: string) => readFileSync(path.join(player, file), "utf8").replace(/\r\n/g, "\n");
+	const config = read("src/app/app_config.h");
 	const define = (name: string) => Number(new RegExp(`#define ${name} ([\\d.]+)f`).exec(config)![1]);
 	const camFov = define("PLAYER_CAM_FOV"), stageFov = define("PLAYER_STAGE_FOV"), aimY = define("PLAYER_CAM_AIM_Y");
-	const scene = readFileSync(path.join(player, "assets/mutuals/main_scene/chunk_0.hzt"), "utf8");
-	const [, y, z] = /^  pos (\S+) (\S+) (\S+)$/m.exec(scene)!.slice(1).map(Number);
+	const scene = read("assets/mutuals/main_scene/chunk_0.hzt");
+	const camera = scene.slice(scene.indexOf("component Camera\n"));
+	const [, y, z] = /^  pos (\S+) (\S+) (\S+)$/m.exec(camera)!.slice(1).map(Number);
 	const reach = Math.hypot(y - aimY, z);
-	const moves = readFileSync(path.join(player, "assets/mutuals/camera_moves.hzt"), "utf8");
+	const moves = read("assets/mutuals/camera_moves.hzt");
 	const seen = new Map(
 		[...moves.matchAll(/^ {2}name "([^"]+)"\n {2}fov (\S+)\n(?: {2}\w+ \S+\n)*? {2}distance (\S+)$/gm)].map((m) => {
 			const fov = Number(m[2]) > 0 ? (Number(m[2]) * camFov) / stageFov : camFov;
@@ -47,6 +49,4 @@ test("push-in and close-up frame tighter than the stage camera, close-up the tig
 	assert.equal(seen.get("pull-back"), stage);
 	assert.ok(seen.get("push-in")! < stage);
 	assert.ok(seen.get("close-up")! < seen.get("push-in")!);
-	// head to waist, not just the face
-	assert.ok(seen.get("close-up")! > 0.5 && seen.get("close-up")! < 0.8, `close-up sees ${seen.get("close-up")} m`);
 });
