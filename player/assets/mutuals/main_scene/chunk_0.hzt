@@ -88,7 +88,7 @@ component EcsDirectionalLight
     g 0.980392
     b 0.925490
     a 1.000000
-  intensity 1.000000
+  intensity 39321.601563
   cast_shadow false
   shadow_strength 1.000000
   shadow_bias 0.050000
@@ -127,7 +127,7 @@ component EcsSceneSettings
     g 0.484529
     b 0.484529
     a 1.000000
-  ambient_intensity 0.500000
+  ambient_intensity 19660.800781
   shadow_color
     r 0.902992
     g 0.904199

@@ -40,8 +40,8 @@ hz_internal u8 *app_emote_rebase_clips(const EmoteBlobAsset *em, String from,
       char *np = ALLOC_ARRAY(&tmp.allocator, char, new_len + 1);
       mem_cpy(np, to.value, to.len);
       mem_cpy(np + to.len, path.value + from.len, path.len - from.len);
-      cur = blob_rebuild_set_string(ti, cur, (u32)((u8 *)&tk->animation - cur),
-                                    np, new_len, &cur_len, &tmp.allocator);
+      cur = blob_rebuild_set_string(ti, cur, &tk->animation, np, new_len, &cur_len,
+                                    &tmp.allocator);
       failed = cur == NULL;
       rebased = true;
     }

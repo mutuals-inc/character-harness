@@ -1,13 +1,14 @@
 type MaterialBlobAsset
-version 19
+version 23
 ---
-shader_source "/shaders/mutuals/mtoon.hz.glsl" ShaderVariantBlobAsset
+shader_source "/shaders/mutuals/mtoon.glsl" ShaderVariantBlobAsset
 depth_test true
 depth_write false
 depth_compare GPU_COMPARE_GREATER_EQUAL
 cull_mode GPU_CULL_NONE
 is_transparent true
 alpha_cutoff true
+alpha_to_coverage false
 blend
   enabled true
   src_factor GPU_BLEND_SRC_ALPHA
@@ -49,7 +50,7 @@ properties 24
     r 0.000000
     g 0.000000
     b 0.000000
-    a 1.000000
+    a 39321.601563
 
   name "matcap_color"
   type MAT_PROP_COLOR4

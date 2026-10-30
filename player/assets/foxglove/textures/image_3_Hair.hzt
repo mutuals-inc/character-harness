@@ -1,5 +1,5 @@
 type TextureBlobAsset
-version 19
+version 23
 ---
 image "/foxglove/textures/image_3_Hair" u8
 format TEX_FORMAT_BC3

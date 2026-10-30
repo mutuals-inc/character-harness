@@ -12,10 +12,12 @@
 // pass (MTOON_OVER_HAIR) that draws brows and lashes through the bangs.
 
 @vs
+#define HZ_RENDERER_VERTEX_SHADER
 #define HZ_RENDERER_BLENDSHAPED
 #define HZ_RENDERER_SKINNED
 #define HZ_RENDERER_LIGHTING_CLUSTERS
 #define HZ_RENDERER_VS_MATERIAL
+#include "renderer_shaders.glsl"
 out vec3 v_world_pos;
 out vec3 v_normal;
 out vec2 v_uv;
@@ -57,7 +59,7 @@ void main() {
     v_model_c2 = v.model[2].xyz;
 
     vec4 position_ws = v.model * vec4(v.pos, 1.0);
-    gl_Position = hz_scene.view_proj * position_ws;
+    gl_Position = hz_instance_clip(v, position_ws);
 #ifdef MTOON_OVER_HAIR
     // move only the depth: test as if `push` meters closer to the camera, so
     // the brows win over the bangs right in front of them and still lose to
@@ -67,7 +69,7 @@ void main() {
     float camera_dist = length(toward_camera);
     vec3 nearer = position_ws.xyz +
                   toward_camera * (min(push, 0.5 * camera_dist) / max(camera_dist, 1e-4));
-    vec4 nearer_clip = hz_scene.view_proj * vec4(nearer, 1.0);
+    vec4 nearer_clip = hz_instance_clip(v, vec4(nearer, 1.0));
     gl_Position.z = nearer_clip.z / nearer_clip.w * gl_Position.w;
 #endif
     v_world_pos = position_ws.xyz;
@@ -81,21 +83,31 @@ void main() {
 #ifdef HZ_RENDERER_GBUFFER
     // this frame's and last frame's clip positions, without jitter, for motion
     // vectors; last frame's pose is rebuilt the same way, blendshapes then skin
-    v_clip_cur = hz_scene.view_proj_unjittered * position_ws;
     vec3 last_pos = rest_pos;
     apply_blendshapes_prev(last_pos, v.vertex_index, v.bs_offsets_base, v.bs_weights_offset);
     last_pos = apply_skinning_prev_pos(last_pos, v.bone_offset, v.vertex_base, v.vertex_layout_flags);
-    v_clip_prev = hz_scene.prev_view_proj * (unpack_prev_model() * vec4(last_pos, 1.0));
+    HzVelocity vel = hz_instance_velocity(v, position_ws, unpack_prev_model() * vec4(last_pos, 1.0));
+    v_clip_cur = vel.clip_cur;
+    v_clip_prev = vel.clip_prev;
 #endif
 }
 @end
 
 @fs
+#undef HZ_RENDERER_VERTEX_SHADER
+#define HZ_RENDERER_FRAGMENT_SHADER
 #define HZ_RENDERER_SHADOWS
-#define HZ_RENDERER_IBL
 #define HZ_RENDERER_LIGHTING_CLUSTERS
+// WebGPU allows 16 sampled textures per stage and the material has 14, so the
+// web build leaves out the sky light and fog (2 + 3 textures); the player's
+// stage has no sky light and its fog is too thin to see at portrait distance
+#ifndef SHADER_BACKEND_WGSL
+#define HZ_RENDERER_IBL
 #define HZ_RENDERER_FOG
-layout(location = 0) out vec4 frag_color;
+#endif
+// hz_output_lit declares and writes every target the pass asks for
+#define HZ_RENDERER_OUTPUT
+#include "renderer_shaders.glsl"
 in vec3 v_world_pos;
 in vec3 v_normal;
 in vec2 v_uv;
@@ -113,15 +125,6 @@ in float v_vcolor_r;
 #ifdef HZ_RENDERER_GBUFFER
 in vec4 v_clip_cur;
 in vec4 v_clip_prev;
-layout(location = 1) out vec2 frag_velocity;
-#ifdef HZ_RENDERER_TAAU
-layout(location = 2) out vec2 frag_normal;
-layout(location = 3) out float frag_depth;
-layout(location = 4) out float frag_reactive;
-layout(location = 5) out vec4 frag_opaque;
-#else
-layout(location = 2) out vec4 frag_normal;
-#endif
 #endif
 
 // The material, as the model's VRM MToon settings fill it; the engine's
@@ -129,7 +132,7 @@ layout(location = 2) out vec4 frag_normal;
 // leaves the result unchanged when the material has none (white multiplies by
 // one, black adds nothing, the flat normal bends nothing). The field order is
 // fixed: the vertex stage reads face_params and over_hair_params by position,
-// and mtoon_outline.hz.glsl reads the same slice up to face_mask_map.
+// and mtoon_outline.glsl reads the same slice up to face_mask_map.
 @material
 struct MaterialFS {
     @color vec4 lit_color;     // base color; .a opacity
@@ -187,6 +190,24 @@ struct MaterialFS {
     vec4 over_hair_rect;
     vec4 over_hair_params;
 };
+
+// the sky's diffuse light toward dir; none without the sky light
+vec3 toon_sky(vec3 dir) {
+#ifdef HZ_RENDERER_IBL
+    return ibl_irradiance(dir);
+#else
+    return vec3(0.0);
+#endif
+}
+
+// fog over a lit color; none without fog
+vec3 toon_fog(vec3 color, float view_depth) {
+#ifdef HZ_RENDERER_FOG
+    return hz_fog_apply(color, view_depth);
+#else
+    return color;
+#endif
+}
 
 // 0 below a, 1 above b, linear between; never divides by zero
 float toon_step(float a, float b, float x) {
@@ -296,7 +317,7 @@ void main() {
 
     float shift = toon_shift(mat, uv);
     float toony = mat.toon.y;
-    float cast_shadow = mix(1.0, calculate_shadow(v_world_pos), mat.shadow_strength);
+    float cast_shadow = mix(1.0, hz_shadow(v_world_pos), mat.shadow_strength);
 
     // direct light; `received` sums the light falling here, which the rim
     // follows by rim_color.a
@@ -331,8 +352,8 @@ void main() {
     // ambient: the sky's diffuse light plus the scene ambient, blended toward
     // its up/down average by the GI equalization factor
     vec3 scene_ambient = hz_scene.lights.ambient * hz_scene.lights.ambient_intensity;
-    vec3 sky_here = ibl_irradiance(N);
-    vec3 sky_even = 0.5 * (ibl_irradiance(vec3(0.0, 1.0, 0.0)) + ibl_irradiance(vec3(0.0, -1.0, 0.0)));
+    vec3 sky_here = toon_sky(N);
+    vec3 sky_even = 0.5 * (toon_sky(vec3(0.0, 1.0, 0.0)) + toon_sky(vec3(0.0, -1.0, 0.0)));
     vec3 ambient = scene_ambient + mix(sky_here, sky_even, mat.gi_params.x);
     color += lit * ambient;
     received += ambient;
@@ -355,44 +376,17 @@ void main() {
         rim *= v_vcolor_r;
     color += rim * mix(vec3(1.0), received, mat.rim_color.a);
 
-    color += mat.emissive.rgb * mat.emissive.a * texture_sample(emissive_map, mat.emissive_map, uv).rgb;
+    color += mat.emissive.rgb * mat.emissive.a * texture_sample(emissive_map, mat.emissive_map, uv).rgb *
+             hz_scene.pre_exposure;
 
-    color = hz_apply_fog(color, v_view_depth);
+    color = toon_fog(color, v_view_depth);
     float alpha = base.a;
 #ifdef MTOON_OVER_HAIR
     // drawn over the hair at its opacity, fading out as the face turns away
     alpha *= mat.over_hair_params.y * smoothstep(mat.over_hair_params.z, max(mat.over_hair_params.w, mat.over_hair_params.z + 1e-4), dot(N, V));
 #endif
-    frag_color = vec4(color, alpha);
-
-#ifdef HZ_RENDERER_GBUFFER
-#ifdef HZ_RENDERER_TRANSPARENT
-    // a transparent surface leaves motion and normal to what is behind it;
-    // its alpha marks it for the upscaler
-    frag_velocity = vec2(0.0);
-#ifdef HZ_RENDERER_TAAU
-    frag_normal = vec2(0.0);
-#else
-    frag_normal = vec4(0.0, 0.0, 0.0, clamp(base.a, 0.0, 0.9));
-#endif
-#else
-    frag_velocity = v_clip_cur.xy / v_clip_cur.w - v_clip_prev.xy / v_clip_prev.w;
-#ifdef HZ_RENDERER_TAAU
-    frag_normal = oct_encode_normal(N);
-#else
-    frag_normal = vec4(oct_encode_normal(N), 0.0, 0.0);
-#endif
-#endif
-#ifdef HZ_RENDERER_TAAU
-    frag_depth = gl_FragCoord.z;
-#ifdef HZ_RENDERER_TRANSPARENT
-    frag_reactive = clamp(base.a, 0.0, 0.9);
-    frag_opaque = vec4(0.0);
-#else
-    frag_reactive = 0.0;
-    frag_opaque = vec4(color, 1.0);
-#endif
-#endif
-#endif
+    HzSurface surface = hz_surface_default();
+    surface.normal = N;
+    hz_output_lit(vec4(color, alpha), surface, HZ_VELOCITY(v_clip_cur, v_clip_prev));
 }
 @end

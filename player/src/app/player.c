@@ -267,15 +267,15 @@ ecs_system(player_face_material_resolve_system, EcsIn(EcsModelInstance),
       CString mp = subs.items[s].material.path.len
                        ? string_blob_get(&subs.items[s].material.path)
                        : NULL;
-      const RendererSubMeshInstance *si =
-          renderer_submesh_instance(r, rmi->children.items[s]);
-      if (!si || !handle_is_valid(HANDLE_CAST(HzHandle, si->material)))
+      HzHandleT(RendererMaterial) sm =
+          renderer_submesh_instance_material(r, rmi->children.items[s]);
+      if (!handle_is_valid(HANDLE_CAST(HzHandle, sm)))
         continue;
       String nm = sn ? cstr_to_str(sn) : (mp ? cstr_to_str(mp) : (String){0});
       if (skin_name.len && str_contains_nocase(nm, skin_name))
-        face_mat = si->material;
+        face_mat = sm;
       else if (eye_name.len && str_contains_nocase(nm, eye_name))
-        eye_mat = si->material;
+        eye_mat = sm;
     }
     f32 teary_amp = 0.0f;
     if (handle_is_valid(HANDLE_CAST(HzHandle, face_mat)))
@@ -570,17 +570,20 @@ hz_internal void player_body_beat(AppState *s, EcsWorld *w, const char *reg,
       EcsEntity e = it.entities[i];
       if (reg && reg[0])
         character_actor_set_register(w, e, reg);
-      EcsEmotePlayer *ep = ecs_component_get(w, e, EcsEmotePlayer);
       if (g) {
         character_emote_play(w, e, emote);
-        ep = ecs_component_get(w, e, EcsEmotePlayer);
-        if (ep && g->hold)
+        EcsEmotePlayer *ep = g->hold ? ecs_component_get_mut(w, e, EcsEmotePlayer) : NULL;
+        if (ep)
           ep->hold_indef = true;
-      } else if (ep && ep->hold_indef) {
-        // no gesture this beat: a held pose lets the talking loop back in
-        ep->hold_indef = false;
-        ep->active = false;
-        ep->started = false;
+      } else {
+        const EcsEmotePlayer *held = ecs_component_get(w, e, EcsEmotePlayer);
+        if (held && held->hold_indef) {
+          // no gesture this beat: a held pose lets the talking loop back in
+          EcsEmotePlayer *ep = ecs_component_get_mut(w, e, EcsEmotePlayer);
+          ep->hold_indef = false;
+          ep->active = false;
+          ep->started = false;
+        }
       }
     }
 }
@@ -806,6 +809,20 @@ hz_internal void player_link_bundled_cooked(void) {
 }
 #endif
 
+// whether the build has this cooked file. A web build fetches its files and
+// has no os_file_exists, so there the file is read instead (these are small)
+hz_internal b32 player_cooked_exists(const char *path) {
+#ifdef WASM
+  b32 found = false;
+  tctx_temp_allocator_scope(ta, NULL) {
+    found = os_read_file(path, &ta.allocator).success;
+  }
+  return found;
+#else
+  return os_file_exists(path);
+#endif
+}
+
 HZ_APP_API void app_init(AppMemory *memory) {
   if (!is_main_thread())
     return;
@@ -871,8 +888,8 @@ HZ_APP_API void app_init(AppMemory *memory) {
                                       .cascade_size = 4096,
                                       .max_distance = 5.0f},
                        });
-  if (state->studio_url[0]) renderer_add_draw_source(ecs_resource_get_mut(w,RendererState),&(RendererDrawSourceDesc){
-    .name="Studio alpha",.flags=RENDERER_SOURCE_AFTER_RESOLVE|RENDERER_SOURCE_SAMPLES_SCENE_DEPTH,.user=state,
+  if (state->studio_url[0]) renderer_add_feature(ecs_resource_get_mut(w,RendererState),&(RendererFeatureDesc){
+    .name="Studio alpha",.reads=RENDERER_RESOURCE_DEPTH,.user=state,
     .record={[RENDERER_PHASE_AFTER_RESOLVE]=player_studio_resolved},
   });
   ecs_transform_init(w, NULL);
@@ -947,13 +964,13 @@ HZ_APP_API void app_init(AppMemory *memory) {
     mem_cpy(cooked, "cooked/", 7);
     mem_cpy(cooked + 7, profile, len - 4);
     mem_cpy(cooked + 7 + len - 4, ".hza", 5);
-    if (!os_file_exists(cooked)) {
+    if (!player_cooked_exists(cooked)) {
       log_error("player: this build has no profile named \"%\"; give a .vrm instead",
                 fmt_cstr(state->character_path));
       character = NULL;
     }
   }
-  CString gestures = os_file_exists(PLAYER_GESTURES_COOKED) ? PLAYER_GESTURES : NULL;
+  CString gestures = player_cooked_exists(PLAYER_GESTURES_COOKED) ? PLAYER_GESTURES : NULL;
   if (!character) {
     // the missing profile was reported above
   } else if (!character[0]) {
@@ -1020,7 +1037,7 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   ecs_assets_schedule(w);
   ecs_audio_schedule(w);
   ecs_transform_schedule(w);
-  ecs_camera_schedule(w);
+  ecs_camera_schedule(w, NULL);
   ecs_cloth_resolve_schedule(w);
   ecs_flush(w, memory->dt);
 
@@ -1032,7 +1049,10 @@ HZ_APP_API void app_update_and_render(AppMemory *memory) {
   }
   ecs_schedule_single(w, player_submesh_shadow_optout_system);
   ecs_schedule_single(w, player_face_material_resolve_system);
-  CharacterScheduleDesc csd = {0};
+  // the upper-body mask is empty, so the overlay pass changes nothing; skipping
+  // it avoids 0.6.3's resolve_anim_overlay_system world-arena assert. Turn it
+  // back on once the engine fixes that, before giving the mask any weight
+  CharacterScheduleDesc csd = {.no_overlays = true};
   character_schedule_pose(w, &csd);
   ecs_schedule_single(w, light_aim_init_system);
   ecs_schedule_single(w, light_aim_apply_system);
