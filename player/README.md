@@ -228,6 +228,12 @@ The runtime sets the first three when it starts the player.
 
 FoxGlove is a profile cooked into the player (`assets/characters/foxglove.hzt`): her model, rig, face and expressions are in `assets/foxglove/`, with hair, skirt and bust physics and her own expression effects (sparkling eyes, tears, blush). Her idle loops, idle breaks and gestures are animations in her model, played through `assets/foxglove/states.hzt`, `assets/foxglove/emotes/` and `assets/mutuals/gestures.hzt`; their `.vrma` sources are in `characters/foxglove/animations/`. She has no talking loops yet: while she talks she stays in her idle loop.
 
+## Toon shading and light
+
+The toon shader takes the sun as MToon's light colour: at 1, the lit side shows the material's base colour and the shade side its shade colour. The engine hands shaders a directional light as pre-exposed lux over pi, so at the engine's default exposure (EV100 15) the stage's sun is 1.2 × 2^15 × π ≈ 123,533 lux, which reaches the shader at 1. The ambient (`ambient_intensity`) has no pi: 19,661 at EV100 15 is 0.5 of its colour.
+
+WebGPU allows 16 textures per shader stage, and the shadows, sky light and fog take 7, which leaves 9 of `mtoon.glsl`'s 14 maps. A material leaves out the maps it never sets with `MTOON_NO_<MAP>` keywords (FoxGlove's materials in `assets/foxglove/materials/` do). On the web those maps aren't bound and read as their defaults, as unset maps do on the desktop, so both builds draw the same. A material with more than 9 maps, like one the VRM importer makes, still draws on the web, without sky light and fog. The desktop build binds every map whatever the keywords say.
+
 ## Loading a VRM
 
 The runtime prepares a character's model: its `.vrm` with the character's animations retargeted onto it, and a table of which clip is idle, which talking style, which gesture. The first load imports it with the engine's glTF importer (`src/app/player_vrm.c`) and caches it under `cooked/vrm/<name>/` (in this folder for your own build, in the app's Application Support folder for a release), a few seconds for a typical model; later loads reuse the cache until the file changes.
@@ -258,7 +264,7 @@ The runtime prepares a character's model: its `.vrm` with the character's animat
 | `assets/characters/foxglove.hzt`, `assets/foxglove/` | FoxGlove: her profile, model and animations, rig, face, expressions, physics, states and emotes |
 | `assets/mutuals/` | the stage, camera moves, emotions, the gesture set of a cooked-in profile, the lip sync profile, an upper-body mask (empty; the engine expects one) |
 | `assets/vad/` | the voice activity model ([Silero VAD](https://github.com/snakers4/silero-vad), MIT licence) |
-| `shaders/mutuals/` | the toon and outline shaders (`mtoon.glsl`, `mtoon_outline.glsl`); the engine's VRM importer binds VRM materials to `mtoon.glsl`. In the web build they leave out sky light and fog, to fit WebGPU's 16 textures per shader stage |
+| `shaders/mutuals/` | the toon and outline shaders (`mtoon.glsl`, `mtoon_outline.glsl`); the engine's VRM importer binds VRM materials to `mtoon.glsl`. The web build draws them like the desktop build, sky light and fog included; see "Toon shading and light" below |
 
 ## Release tags and download links
 
