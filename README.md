@@ -10,15 +10,21 @@ The harness [Mutuals](https://github.com/mutuals-inc) uses to give life to its c
 
 <!-- player-releases:start -->
 - [Windows x64 — v0.1.0-windows-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-windows-x64)
+- [macOS Apple Silicon — v0.1.0-macos-arm64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-macos-arm64)
+- [Linux x64 — v0.1.0-linux-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-linux-x64)
+- [Web (WebAssembly) — v0.1.2-web-wasm (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.2-web-wasm)
 <!-- player-releases:end -->
 
-Player releases are made for Windows x64, macOS Apple Silicon and Linux x64;
+Player releases are made for Windows x64, macOS Apple Silicon and Linux x64,
+plus a web (WebAssembly) build that Studio loads in WebGPU browsers;
 a platform shows up here once its first release is published.
 These links track the newest published version for each available platform,
 including pre-releases, and update automatically when releases change.
 [All releases](https://github.com/mutuals-inc/character-harness/releases).
-Follow the release's instructions to run the player and Node harness together;
-using a player release needs no Kaigen SDK or licence.
+Follow a desktop release's instructions to run the player and Node harness together;
+install the web build with `npm run web-player -- download` (see
+[frontend/README.md](frontend/README.md#kaigen-in-the-browser)).
+Using a player release needs no Kaigen SDK or licence.
 
 ## How it works
 

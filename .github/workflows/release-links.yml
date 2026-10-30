@@ -1,5 +1,8 @@
 name: Update player download links
 
+# main is protected (changes go through a pull request that passes "check"), so
+# this workflow commits the README to its own branch and opens a pull request.
+
 on:
   release:
     types: [published, edited, deleted, unpublished]
@@ -7,6 +10,7 @@ on:
 
 permissions:
   contents: write
+  pull-requests: write
 
 concurrency:
   group: player-release-links
@@ -15,6 +19,11 @@ concurrency:
 jobs:
   update:
     runs-on: ubuntu-latest
+    env:
+      BRANCH: automation/player-release-links
+      BASE: ${{ github.event.repository.default_branch }}
+      GH_REPO: ${{ github.repository }}
+      GH_TOKEN: ${{ github.token }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -23,13 +32,60 @@ jobs:
         with:
           node-version: 24
       - run: node scripts/update-release-links.mjs
-        env:
-          GH_TOKEN: ${{ github.token }}
-      - name: Commit updated download links
+      - name: Open or update the pull request
         run: |
-          if git diff --quiet -- README.md; then exit 0; fi
-          git config user.name 'github-actions[bot]'
-          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
-          git add README.md
-          git commit -m "docs: update player download links"
-          git push
+          open_pr=$(gh pr list --head "$BRANCH" --base "$BASE" --state open --json url --jq '.[0].url // ""')
+          branch_exists=false
+          if git fetch --quiet origin "refs/heads/$BRANCH:refs/remotes/origin/$BRANCH" 2>/dev/null; then
+            branch_exists=true
+          fi
+
+          if git diff --quiet -- README.md; then
+            echo "The README download links are up to date."
+            if [ -n "$open_pr" ]; then
+              gh pr close "$open_pr" --comment "The README on $BASE is already up to date."
+            fi
+            if [ "$branch_exists" = true ]; then git push origin --delete "$BRANCH"; fi
+            exit 0
+          fi
+
+          # Pushing the same links again would drop the pull request's "check" result.
+          if [ "$branch_exists" = true ] && git diff --quiet "origin/$BRANCH" -- README.md; then
+            echo "$BRANCH already has these links."
+          else
+            git config user.name 'github-actions[bot]'
+            git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+            git switch -C "$BRANCH"
+            git commit -m "docs: update player download links" -- README.md
+            # The branch belongs to this workflow and is rebuilt from $BASE every run.
+            git push --force origin "HEAD:refs/heads/$BRANCH"
+          fi
+
+          compare="$GITHUB_SERVER_URL/$GITHUB_REPOSITORY/compare/$BASE...$BRANCH?expand=1"
+          ci_note="Pull requests opened by GitHub Actions do not start other workflows, so the required \"check\" will not run on its own. A maintainer can start it by closing and reopening the pull request, or by pushing an empty commit to \`$BRANCH\`."
+          if [ -n "$open_pr" ]; then
+            echo "Updated $open_pr" | tee -a "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          body=$(printf '%s\n\n%s\n' \
+            "Updates the player download links in the README to the newest published release for each platform." \
+            "$ci_note")
+          if url=$(gh pr create --base "$BASE" --head "$BRANCH" \
+              --title "docs: update player download links" --body "$body" 2>"$RUNNER_TEMP/pr-error.txt"); then
+            echo "Opened $url" | tee -a "$GITHUB_STEP_SUMMARY"
+            echo "$ci_note" >> "$GITHUB_STEP_SUMMARY"
+          elif grep -q "not permitted to create or approve pull requests" "$RUNNER_TEMP/pr-error.txt"; then
+            echo "::warning::GitHub Actions may not create pull requests here. Open one from $compare"
+            {
+              echo "### Pull request not opened"
+              echo
+              echo "The updated links are on \`$BRANCH\`, but this repository does not allow GitHub Actions to create pull requests."
+              echo "Open one from $compare, or enable *Settings → Actions → General → Allow GitHub Actions to create and approve pull requests*."
+              echo
+              echo "$ci_note"
+            } >> "$GITHUB_STEP_SUMMARY"
+          else
+            cat "$RUNNER_TEMP/pr-error.txt" >&2
+            exit 1
+          fi
