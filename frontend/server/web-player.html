@@ -17,7 +17,7 @@
       const tell = (message) => parent.postMessage({ t: "web-player", ...message }, location.origin);
       async function start() {
         if (!crossOriginIsolated)
-          return tell({ error: "This browser can't isolate the web player (it needs Chrome or Edge 137 or later)." });
+          return tell({ error: "This browser can't isolate the web player (it needs a recent Chrome or Edge)." });
         const adapter = await navigator.gpu?.requestAdapter().catch(() => null);
         if (!adapter) return tell({ error: "WebGPU is unavailable in this browser." });
         const { createGame } = await import("./main.js");
@@ -25,7 +25,7 @@
         game.oncrash = (message) => tell({ error: `The web player stopped: ${message || "it crashed"}.` });
         tell({ started: true });
       }
-      start().catch((error) => tell({ error: `The web player could not start: ${error?.message ?? error}` }));
+      start().catch((error) => tell({ error: `The web player could not start (${error?.message ?? error}).` }));
     </script>
   </body>
 </html>

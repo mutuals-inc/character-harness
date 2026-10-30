@@ -108,6 +108,7 @@ async function boot(
       }
       // three.js shows the character instead, in this page only
       record("stage", "Web player unavailable", `${error.message} Using three.js.`);
+      console.info(`Web player unavailable: ${error.message} Using three.js.`);
       web.dispose();
       stage = null;
       void startStage(data);
