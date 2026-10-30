@@ -710,12 +710,13 @@ hz_internal void player_studio_mouth(AppState *s) {
 // On a stage narrower than PLAYER_CAM_MOVE_MIN_ASPECT, widens a move's fov to
 // show the width it shows at that aspect, and lowers the camera by as much as
 // the view grows at the character (`reach` away), so the top of the frame, and
-// the head under it, stay put
+// the head under it, stay put. At most twice as tall, so a sliver of a stage
+// (or one a frame into a resize) doesn't swing the camera down the body
 hz_internal PlayerCamMove player_camera_fit(PlayerCamMove m, f32 aspect, f32 reach) {
   if (aspect <= 0.0f || aspect >= PLAYER_CAM_MOVE_MIN_ASPECT)
     return m;
   f32 tan_half = m_tanf(m_radians(m.fov) * 0.5f);
-  f32 wide = tan_half * PLAYER_CAM_MOVE_MIN_ASPECT / aspect;
+  f32 wide = tan_half * m_minf(PLAYER_CAM_MOVE_MIN_ASPECT / aspect, 2.0f);
   m.y -= (reach - m.distance) * (wide - tan_half);
   m.fov = m_degrees(2.0f * m_atanf(wide));
   return m;

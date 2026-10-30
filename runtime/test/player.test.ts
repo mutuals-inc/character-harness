@@ -66,11 +66,13 @@ function head(profile: string) {
 	const profileText = read(`assets/characters/${profile}.hzt`);
 	const rig = read(`assets/${field(profileText, "rig").replace(/\.hza$/, ".hzt")}`);
 	const role = (name: string) => new RegExp(`^  role "${name}"\\n  joint "([^"]+)"$`, "m").exec(rig)![1];
-	const hidden = new Set([.../^hidden \d+ (.*)$/m.exec(rig)![1].matchAll(/"([^"]+)"/g)].map((m) => m[1]));
+	const hidden = new Set([...(/^hidden \d+ (.*)$/m.exec(rig)?.[1] ?? "").matchAll(/"([^"]+)"/g)].map((m) => m[1]));
 	// a model cooks to <folder>/<name>/<name>.hza from <folder>/<name>.glb or .vrm
 	const cooked = field(profileText, "model");
 	const base = path.join(assets, path.dirname(path.dirname(cooked)), path.basename(cooked, ".hza"));
-	const glb = readGlb([".glb", ".vrm"].map((ext) => base + ext).find((f) => existsSync(f))!);
+	const source = [".glb", ".vrm"].map((ext) => base + ext).find((f) => existsSync(f));
+	assert.ok(source, `${profile}: no ${base}.glb or .vrm to read the head from`);
+	const glb = readGlb(source);
 	const nodes = glb.json.nodes!;
 	const parent = new Map<number, number>();
 	nodes.forEach((n, i) => n.children?.forEach((c) => parent.set(c, i)));
@@ -85,12 +87,16 @@ function head(profile: string) {
 	const chest = mpoint(at(index(role("chest"))), [0, 0, 0]);
 	const headJoint = index(role("head"));
 	const underHead = (i: number): boolean => !hidden.has(nodes[i].name ?? "") && (i === headJoint || (parent.has(i) && underHead(parent.get(i)!)));
-	const skins = glb.json.skins as { joints: number[] }[];
+	const skins = glb.json.skins as { joints: number[]; inverseBindMatrices?: number }[];
 	let top = -Infinity;
 	nodes.forEach((n) => {
 		const skin = (n as { skin?: number }).skin;
 		if (n.mesh === undefined || skin === undefined) return;
 		const follows = skins[skin].joints.map(underHead);
+		// a vertex's bind position: its joint's world matrix over the joint's inverse bind
+		const inverseBind = skins[skin].inverseBindMatrices;
+		const ibm = inverseBind === undefined ? undefined : readAccessor(glb, inverseBind);
+		const bind = skins[skin].joints.map((j, k) => (ibm ? mmul(at(j), Array.from(ibm.subarray(k * 16, k * 16 + 16))) : at(j)));
 		for (const prim of (glb.json.meshes as { primitives: { attributes: Record<string, number> }[] }[])[n.mesh].primitives) {
 			const pos = readAccessor(glb, prim.attributes.POSITION);
 			const joints = readAccessor(glb, prim.attributes.JOINTS_0);
@@ -98,7 +104,8 @@ function head(profile: string) {
 			for (let v = 0; v < pos.length / 3; v++) {
 				let k = 0;
 				for (let c = 1; c < 4; c++) if (weights[v * 4 + c] > weights[v * 4 + k]) k = c;
-				if (follows[joints[v * 4 + k]]) top = Math.max(top, pos[v * 3 + 1]);
+				const j = joints[v * 4 + k];
+				if (follows[j]) top = Math.max(top, mpoint(bind[j], [pos[v * 3], pos[v * 3 + 1], pos[v * 3 + 2]])[1]);
 			}
 		}
 	});
@@ -130,6 +137,7 @@ test("the close-up frames the head and shoulders, landscape and portrait", () =>
 	const tanHalf = (deg: number) => Math.tan((deg * Math.PI) / 360);
 
 	const profiles = readdirSync(path.join(repo, "characters"))
+		.filter((id) => existsSync(path.join(repo, "characters", id, "character.yaml")))
 		.map((id) => loadCharacter(path.join(repo, "characters", id)).rig)
 		.flatMap((rig) => (rig.kind === "profile" ? [rig.profile] : []));
 	assert.ok(profiles.length > 0, "a character with a cooked-in profile to check");
@@ -142,7 +150,7 @@ test("the close-up frames the head and shoulders, landscape and portrait", () =>
 		const right = unit(cross(forward, [0, 1, 0]));
 		const up = cross(right, forward);
 		const reach = Math.hypot(...sub(aim, base));
-		for (const [stage, w, h] of [["landscape Studio stage", 536, 385], ["portrait window", 540, 900]] as const) {
+		for (const [stage, w, h] of [["landscape Studio stage", 536, 385], ["4:3 Studio stage", 960, 720], ["portrait window", 540, 900]] as const) {
 			const aspect = w / h;
 			let to = closeUp;
 			if (aspect < minAspect) {
