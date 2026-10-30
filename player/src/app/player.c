@@ -809,6 +809,20 @@ hz_internal void player_link_bundled_cooked(void) {
 }
 #endif
 
+// whether the build has this cooked file. A web build fetches its files and
+// has no os_file_exists, so there the file is read instead (these are small)
+hz_internal b32 player_cooked_exists(const char *path) {
+#ifdef WASM
+  b32 found = false;
+  tctx_temp_allocator_scope(ta, NULL) {
+    found = os_read_file(path, &ta.allocator).success;
+  }
+  return found;
+#else
+  return os_file_exists(path);
+#endif
+}
+
 HZ_APP_API void app_init(AppMemory *memory) {
   if (!is_main_thread())
     return;
@@ -951,13 +965,13 @@ HZ_APP_API void app_init(AppMemory *memory) {
     mem_cpy(cooked, "cooked/", 7);
     mem_cpy(cooked + 7, profile, len - 4);
     mem_cpy(cooked + 7 + len - 4, ".hza", 5);
-    if (!os_file_exists(cooked)) {
+    if (!player_cooked_exists(cooked)) {
       log_error("player: this build has no profile named \"%\"; give a .vrm instead",
                 fmt_cstr(state->character_path));
       character = NULL;
     }
   }
-  CString gestures = os_file_exists(PLAYER_GESTURES_COOKED) ? PLAYER_GESTURES : NULL;
+  CString gestures = player_cooked_exists(PLAYER_GESTURES_COOKED) ? PLAYER_GESTURES : NULL;
   if (!character) {
     // the missing profile was reported above
   } else if (!character[0]) {
