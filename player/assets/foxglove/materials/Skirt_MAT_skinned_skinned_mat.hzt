@@ -155,7 +155,39 @@ properties 24
   name "over_hair_params"
   type MAT_PROP_VEC4
   v4 0.000000 0.000000 0.000000 1.000000
-keywords 0
+keywords 11
+  name "MTOON_NO_EMISSIVE_MAP"
+  value ""
+
+  name "MTOON_NO_MATCAP_MAP"
+  value ""
+
+  name "MTOON_NO_RIM_MAP"
+  value ""
+
+  name "MTOON_NO_SHADING_SHIFT_MAP"
+  value ""
+
+  name "MTOON_NO_FACE_MASK_MAP"
+  value ""
+
+  name "MTOON_NO_HIGHLIGHT_MAP"
+  value ""
+
+  name "MTOON_NO_BLUSH_MASK"
+  value ""
+
+  name "MTOON_NO_NERVOUS_MASK"
+  value ""
+
+  name "MTOON_NO_STAR_EYES_MASK"
+  value ""
+
+  name "MTOON_NO_TEARY_NOISE"
+  value ""
+
+  name "MTOON_NO_TEARY_MASK"
+  value ""
 passes 1
   source "/shaders/mutuals/mtoon_outline.glsl"
   phase RENDERER_PHASE_HDR_OPAQUE

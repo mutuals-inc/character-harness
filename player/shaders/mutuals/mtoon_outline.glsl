@@ -104,10 +104,8 @@ void main() {
 // WebGPU allows 16 sampled textures per stage and the material has 14, so the
 // web build leaves out the sky light and fog (2 + 3 textures); the player's
 // stage has no sky light and its fog is too thin to see at portrait distance
-#ifndef SHADER_BACKEND_WGSL
 #define HZ_RENDERER_IBL
 #define HZ_RENDERER_FOG
-#endif
 // hz_output_lit declares and writes every target the pass asks for
 #define HZ_RENDERER_OUTPUT
 #include "renderer_shaders.glsl"
