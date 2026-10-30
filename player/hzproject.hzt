@@ -2,13 +2,13 @@ type HzProjectConfig
 version 1
 ---
 name CharacterPlayer
+id 73d7b4f10fd3abd6e0edd379bbfb76ed
 engine hz
 src_roots 1 src
 asset_roots 1 assets
 shader_roots 1 shaders
 macos_bundle_name "Character Player"
 macos_bundle_id com.mutuals.characterplayer
-engine_version 0.5.8.003-internal
 publish
   product_name "Character Player"
   version 0.1.0

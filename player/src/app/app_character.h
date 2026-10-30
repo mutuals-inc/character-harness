@@ -13,7 +13,7 @@ HZ_STRUCT_TYPEDEF(AppCharacterCloth) {
   BlobAssetRef(ClothAuthoringBlobAsset) cloth;
 };
 
-// how the Over Hair pass (MTOON_OVER_HAIR in mtoon.hz.glsl) draws this
+// how the Over Hair pass (MTOON_OVER_HAIR in mtoon.glsl) draws this
 // character's brows/lashes over the bangs: depth-tested as if `push` meters
 // nearer the camera (screen position unchanged), blended at `opacity` (1 =
 // their own color, lower lets the hair tint them), faded out between facing

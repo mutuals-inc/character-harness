@@ -3,16 +3,18 @@
 // The outline of a VRM toon material: back faces of a copy of the body, pushed
 // out along the normal by a width measured on screen, and colored by MToon's
 // outline rule, outline color blended toward the shaded body color by the
-// lighting mix. It shades the surface like mtoon.hz.glsl to get that color.
+// lighting mix. It shades the surface like mtoon.glsl to get that color.
 // The outline width and lighting follow MToon 1.0 as published in UniVRM (MIT
 // licence: Copyright (c) 2020 VRM Consortium, Copyright (c) 2018 Masataka SUMI
 // for MToon).
 
 @vs
+#define HZ_RENDERER_VERTEX_SHADER
 #define HZ_RENDERER_BLENDSHAPED
 #define HZ_RENDERER_SKINNED
 #define HZ_RENDERER_LIGHTING_CLUSTERS
 #define HZ_RENDERER_VS_MATERIAL
+#include "renderer_shaders.glsl"
 out vec3 v_world_pos;
 out vec3 v_normal;
 out vec2 v_uv;
@@ -38,7 +40,7 @@ void main() {
 #endif
 
     apply_blendshapes(v.pos, v.vertex_index, v.bs_offsets_base, v.bs_weights_offset);
-    // the head-sphere normal for face shading, as in mtoon.hz.glsl (material
+    // the head-sphere normal for face shading, as in mtoon.glsl (material
     // words 32..34 hold the sphere's center)
     vec3 face_center = vec3(
         uintBitsToFloat(hz_materials.data[v.material_offset + 32u]),
@@ -84,21 +86,31 @@ void main() {
 #ifdef HZ_RENDERER_GBUFFER
     // motion vectors from the surface point before the push: the push barely
     // changes between frames, so it drops out of the difference
-    v_clip_cur = hz_scene.view_proj_unjittered * position_ws;
     vec3 last_pos = rest_pos;
     apply_blendshapes_prev(last_pos, v.vertex_index, v.bs_offsets_base, v.bs_weights_offset);
     last_pos = apply_skinning_prev_pos(last_pos, v.bone_offset, v.vertex_base, v.vertex_layout_flags);
-    v_clip_prev = hz_scene.prev_view_proj * (unpack_prev_model() * vec4(last_pos, 1.0));
+    HzVelocity vel = hz_instance_velocity(v, position_ws, unpack_prev_model() * vec4(last_pos, 1.0));
+    v_clip_cur = vel.clip_cur;
+    v_clip_prev = vel.clip_prev;
 #endif
 }
 @end
 
 @fs
+#undef HZ_RENDERER_VERTEX_SHADER
+#define HZ_RENDERER_FRAGMENT_SHADER
 #define HZ_RENDERER_SHADOWS
-#define HZ_RENDERER_IBL
 #define HZ_RENDERER_LIGHTING_CLUSTERS
+// WebGPU allows 16 sampled textures per stage and the material has 14, so the
+// web build leaves out the sky light and fog (2 + 3 textures); the player's
+// stage has no sky light and its fog is too thin to see at portrait distance
+#ifndef SHADER_BACKEND_WGSL
+#define HZ_RENDERER_IBL
 #define HZ_RENDERER_FOG
-layout(location = 0) out vec4 frag_color;
+#endif
+// hz_output_lit declares and writes every target the pass asks for
+#define HZ_RENDERER_OUTPUT
+#include "renderer_shaders.glsl"
 in vec3 v_world_pos;
 in vec3 v_normal;
 in vec2 v_uv;
@@ -111,22 +123,13 @@ flat in vec3 v_model_c0;
 flat in vec3 v_model_c1;
 flat in vec3 v_model_c2;
 in float v_vcolor_r;
-// the renderer's extra targets when it asks for them, as in mtoon.hz.glsl
+// the renderer's extra targets when it asks for them, as in mtoon.glsl
 #ifdef HZ_RENDERER_GBUFFER
 in vec4 v_clip_cur;
 in vec4 v_clip_prev;
-layout(location = 1) out vec2 frag_velocity;
-#ifdef HZ_RENDERER_TAAU
-layout(location = 2) out vec2 frag_normal;
-layout(location = 3) out float frag_depth;
-layout(location = 4) out float frag_reactive;
-layout(location = 5) out vec4 frag_opaque;
-#else
-layout(location = 2) out vec4 frag_normal;
-#endif
 #endif
 
-// The start of mtoon.hz.glsl's material, field for field, as plain vec4s: the
+// The start of mtoon.glsl's material, field for field, as plain vec4s: the
 // outline reads the body material's slice, so the order must match exactly.
 @material
 struct MaterialFS {
@@ -162,7 +165,25 @@ struct MaterialFS {
     uint face_mask_map;
 };
 
-// the toon ramp helpers, as in mtoon.hz.glsl
+// the sky's diffuse light toward dir; none without the sky light
+vec3 toon_sky(vec3 dir) {
+#ifdef HZ_RENDERER_IBL
+    return ibl_irradiance(dir);
+#else
+    return vec3(0.0);
+#endif
+}
+
+// fog over a lit color; none without fog
+vec3 toon_fog(vec3 color, float view_depth) {
+#ifdef HZ_RENDERER_FOG
+    return hz_fog_apply(color, view_depth);
+#else
+    return color;
+#endif
+}
+
+// the toon ramp helpers, as in mtoon.glsl
 float toon_step(float a, float b, float x) {
     return clamp((x - a) / max(b - a, 1e-4), 0.0, 1.0);
 }
@@ -217,9 +238,9 @@ void main() {
 
     float shift = toon_shift(mat, v_uv);
     float toony = mat.toon.y;
-    float cast_shadow = mix(1.0, calculate_shadow(v_world_pos), mat.shadow_strength);
+    float cast_shadow = mix(1.0, hz_shadow(v_world_pos), mat.shadow_strength);
 
-    // the body's shaded color, as mtoon.hz.glsl computes it
+    // the body's shaded color, as mtoon.glsl computes it
     vec3 color = vec3(0.0);
     vec3 received = vec3(0.0);
     uint sun_count = min(hz_scene.lights.directional_count, 4u);
@@ -247,8 +268,8 @@ void main() {
     HZ_CLUSTER_LOOP_END
 
     vec3 scene_ambient = hz_scene.lights.ambient * hz_scene.lights.ambient_intensity;
-    vec3 sky_here = ibl_irradiance(N);
-    vec3 sky_even = 0.5 * (ibl_irradiance(vec3(0.0, 1.0, 0.0)) + ibl_irradiance(vec3(0.0, -1.0, 0.0)));
+    vec3 sky_here = toon_sky(N);
+    vec3 sky_even = 0.5 * (toon_sky(vec3(0.0, 1.0, 0.0)) + toon_sky(vec3(0.0, -1.0, 0.0)));
     vec3 ambient = scene_ambient + mix(sky_here, sky_even, mat.gi_params.x);
     color += lit * ambient;
     received += ambient;
@@ -267,23 +288,14 @@ void main() {
         rim *= v_vcolor_r;
     color += rim * mix(vec3(1.0), received, mat.rim_color.a);
 
-    color += mat.emissive.rgb * mat.emissive.a * texture_sample(emissive_map, mat.emissive_map, v_uv).rgb;
+    color += mat.emissive.rgb * mat.emissive.a * texture_sample(emissive_map, mat.emissive_map, v_uv).rgb *
+             hz_scene.pre_exposure;
 
     // the outline color, blended toward the body color by the lighting mix
-    vec3 outline = hz_apply_fog(mat.outline_color.rgb * mix(vec3(1.0), color, mat.outline_params.y),
-                                v_view_depth);
-    frag_color = vec4(outline, base.a);
-
-#ifdef HZ_RENDERER_GBUFFER
-    frag_velocity = v_clip_cur.xy / v_clip_cur.w - v_clip_prev.xy / v_clip_prev.w;
-#ifdef HZ_RENDERER_TAAU
-    frag_normal = oct_encode_normal(N);
-    frag_depth = gl_FragCoord.z;
-    frag_reactive = 0.0;
-    frag_opaque = vec4(outline, 1.0);
-#else
-    frag_normal = vec4(oct_encode_normal(N), 0.0, 0.0);
-#endif
-#endif
+    vec3 outline = toon_fog(mat.outline_color.rgb * mix(vec3(1.0), color, mat.outline_params.y),
+                            v_view_depth);
+    HzSurface surface = hz_surface_default();
+    surface.normal = N;
+    hz_output_lit(vec4(outline, base.a), surface, HZ_VELOCITY(v_clip_cur, v_clip_prev));
 }
 @end

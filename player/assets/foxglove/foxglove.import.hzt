@@ -7,7 +7,7 @@ shader_override 0
 pass_override 10
   material "BodySkin_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -27,7 +27,7 @@ pass_override 10
     keywords 0
   material "Boots_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -47,7 +47,7 @@ pass_override 10
     keywords 0
   material "Facial_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -67,7 +67,7 @@ pass_override 10
     keywords 0
   material "Hair_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -87,7 +87,7 @@ pass_override 10
     keywords 0
   material "Heart_Mat_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -107,7 +107,7 @@ pass_override 10
     keywords 0
   material "NovaSaia_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -127,7 +127,7 @@ pass_override 10
     keywords 0
   material "PulseVein_Mat_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -147,7 +147,7 @@ pass_override 10
     keywords 0
   material "Shirt_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -167,7 +167,7 @@ pass_override 10
     keywords 0
   material "Skirt_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
@@ -187,7 +187,7 @@ pass_override 10
     keywords 0
   material "Sleeves_MAT_skinned"
   passes 1
-    source "/shaders/mutuals/mtoon_outline.hz.glsl"
+    source "/shaders/mutuals/mtoon_outline.glsl"
     phase RENDERER_PHASE_HDR_OPAQUE
     order -1
     state_mask 9
