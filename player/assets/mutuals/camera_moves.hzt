@@ -19,7 +19,7 @@ moves 4
   transition 0.140000
 
   name "close-up"
-  fov 24.000002
+  fov 12.000000
   x 0.000000
   y 0.155556
   distance 0.100000
