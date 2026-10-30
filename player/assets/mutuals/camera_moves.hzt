@@ -19,9 +19,9 @@ moves 4
   transition 0.140000
 
   name "close-up"
-  fov 12.000000
+  fov 10.500000
   x 0.000000
-  y 0.155556
+  y 0.190000
   distance 0.100000
   curve CHARACTER_EASE_CUBIC_IN
   transition 0.150000
