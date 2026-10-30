@@ -31,6 +31,12 @@ test("the web toon shader has room for the sky light and fog on every FoxGlove m
 	assert.ok(optional.size > 0, "mtoon.glsl names no MTOON_NO_ keywords");
 	for (const map of optional.keys()) assert.ok(maps.includes(map), `MTOON_NO_${map.toUpperCase()} names no map of the material`);
 	assert.deepEqual(maps.filter((m) => !optional.has(m)), ["map", "normal_map"], "only map and normal_map always stay");
+	// a left-out map reads on the web as what its default texture gives on the desktop
+	for (const [map, kw] of optional) {
+		const fallback = new RegExp(`^#define MTOON_SAMPLE_${map}\\(uv\\) vec4\\((\\S+)\\)$`, "m").exec(glsl)?.[1];
+		const annotation = new RegExp(`@texture2D @(\\w+)\\n\\s+uint ${map};`).exec(glsl)?.[1];
+		assert.equal(fallback, { white: "1.0", black: "0.0" }[annotation ?? ""], `${kw}: ${map} defaults to @${annotation} but reads as vec4(${fallback})`);
+	}
 	const limit = Number(/^#if !defined\(SHADER_BACKEND_WGSL\) \|\| MTOON_MAP_COUNT <= (\d+)$/m.exec(glsl)![1]);
 	assert.equal(limit, WEBGPU_TEXTURES - SHADOW_TEXTURES - SKY_AND_FOG_TEXTURES);
 

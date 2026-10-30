@@ -101,9 +101,8 @@ void main() {
 #define HZ_RENDERER_FRAGMENT_SHADER
 #define HZ_RENDERER_SHADOWS
 #define HZ_RENDERER_LIGHTING_CLUSTERS
-// WebGPU allows 16 sampled textures per stage and the material has 14, so the
-// web build leaves out the sky light and fog (2 + 3 textures); the player's
-// stage has no sky light and its fog is too thin to see at portrait distance
+// the sky light and fog, on the web too: with the shadows (2) and this
+// material's 8 maps they take 15 of WebGPU's 16 textures per stage
 #define HZ_RENDERER_IBL
 #define HZ_RENDERER_FOG
 // hz_output_lit declares and writes every target the pass asks for
