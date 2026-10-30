@@ -15,6 +15,8 @@ import {
 } from "./session.ts";
 import type { CharacterStage } from "./stage/stage.ts";
 import { NativeStage } from "./stage/native.ts";
+import { WebPlayerStage } from "./stage/web-player.ts";
+import { chooseStage } from "./stage/choose.ts";
 import { shell } from "./ui/shell.ts";
 import { renderTranscript, studio, renderStudioLive } from "./ui/studio.ts";
 import {
@@ -56,7 +58,7 @@ import type { Bootstrap, CharacterInfo } from "./types.ts";
 
 installExtensionOrdering();
 
-let stage: CharacterStage | NativeStage | null = null;
+let stage: CharacterStage | NativeStage | WebPlayerStage | null = null;
 let pendingDeletion: CharacterInfo | null = null;
 let lastAudibleVolume = state.settings.volume || 0.8;
 async function boot(
@@ -89,6 +91,34 @@ async function boot(
   renderForms();
   if (creationDraft) $("#view-character-new").replaceChildren(creationDraft);
   renderTranscript();
+  const choice = chooseStage({
+    native: Boolean(window.nativeStudio),
+    webPlayer: data.webPlayer,
+    webgpu: "gpu" in navigator,
+    override: new URLSearchParams(location.search).get("stage"),
+  });
+  if (choice.kind === "web-player") {
+    const web = new WebPlayerStage($("#stage-canvas"));
+    stage = web;
+    web.load(data.webPlayer!).catch((error: Error) => {
+      if (stage !== web) return;
+      if (choice.forced) {
+        $("#stage-loading").textContent = error.message;
+        return;
+      }
+      // three.js shows the character instead, in this page only
+      record("stage", "Web player unavailable", `${error.message} Using three.js.`);
+      web.dispose();
+      stage = null;
+      void startStage(data);
+    });
+  } else await startStage(data);
+  setView(view);
+  renderSessionState();
+  await refreshDevices();
+}
+
+async function startStage(data: Bootstrap) {
   try {
     if (window.nativeStudio) stage = new NativeStage($("#stage-canvas"));
     else { const { CharacterStage } = await import("./stage/stage.ts"); stage = new CharacterStage($("#stage-canvas")); }
@@ -97,9 +127,6 @@ async function boot(
     $("#stage-loading").textContent =
       window.nativeStudio ? "The native preview could not initialize." : "WebGL is unavailable. Enable hardware acceleration to use the 3D stage.";
   }
-  setView(view);
-  renderSessionState();
-  await refreshDevices();
 }
 
 function renderForms() {

@@ -2108,6 +2108,7 @@ dialog #toast:not(.visible) {
 .studio-stage-column .stage.expanded { height: auto; }
 
 .native-stage #stage-loading { z-index:3; }
+.web-player-stage .stage-background { display: none; }
 
 
 
