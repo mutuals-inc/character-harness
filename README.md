@@ -11,8 +11,8 @@ The harness [Mutuals](https://github.com/mutuals-inc) uses to give life to its c
 <!-- player-releases:start -->
 - [Windows x64 — v0.1.0-windows-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-windows-x64)
 - [macOS Apple Silicon — v0.1.0-macos-arm64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-macos-arm64)
-- [Linux x64 — v0.1.0-linux-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.0-linux-x64)
-- [Web (WebAssembly) — v0.1.2-web-wasm (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.2-web-wasm)
+- [Linux x64 — v0.1.1-linux-x64 (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.1-linux-x64)
+- [Web (WebAssembly) — v0.1.3-web-wasm (pre-release)](https://github.com/mutuals-inc/character-harness/releases/tag/v0.1.3-web-wasm)
 <!-- player-releases:end -->
 
 Player releases are made for Windows x64, macOS Apple Silicon and Linux x64,
