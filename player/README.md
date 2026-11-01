@@ -86,7 +86,7 @@ below build and run the standalone player.
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.4.002`); install it with `kaigen engine install`.
 2. Link this folder to the pinned engine (git ignores the link):
 
    ```bash
@@ -111,7 +111,7 @@ HARNESS_PLAYER="cd player && hz/hzbuild macos run"
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.4.002`); install it with `kaigen engine install`.
 2. Link this folder to the pinned engine (git ignores the link):
 
    ```powershell
@@ -157,7 +157,7 @@ for the build and the run. Studio's desktop mode doesn't run on Linux yet
 
 The engine's WebAssembly build renders with WebGPU, with the same shaders as
 the desktop player. It needs the engine's `wasm` component
-(`kaigen engine add wasm --version 0.6.3.001`). From `player/`:
+(`kaigen engine add wasm --version 0.6.4.002`). From `player/`:
 
 ```bash
 kaigen restore
