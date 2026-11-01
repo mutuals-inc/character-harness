@@ -86,7 +86,7 @@ below build and run the standalone player.
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.4.002`); install it with `kaigen engine install`.
 2. Link this folder to the pinned engine (git ignores the link):
 
    ```bash
@@ -111,7 +111,7 @@ HARNESS_PLAYER="cd player && hz/hzbuild macos run"
 
 Run these steps from `player/`.
 
-1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.3.001`); install it with `kaigen engine install`.
+1. Install Kaigen and activate your licence (`kaigen activate <licence-key> --accept-terms`). The project is pinned to the engine version in `hzproject.hzt` (`0.6.4.002`); install it with `kaigen engine install`.
 2. Link this folder to the pinned engine (git ignores the link):
 
    ```powershell
@@ -157,7 +157,7 @@ for the build and the run. Studio's desktop mode doesn't run on Linux yet
 
 The engine's WebAssembly build renders with WebGPU, with the same shaders as
 the desktop player. It needs the engine's `wasm` component
-(`kaigen engine add wasm --version 0.6.3.001`). From `player/`:
+(`kaigen engine add wasm --version 0.6.4.002`). From `player/`:
 
 ```bash
 kaigen restore
@@ -232,7 +232,9 @@ FoxGlove is a profile cooked into the player (`assets/characters/foxglove.hzt`):
 
 The toon shader takes the sun as MToon's light colour: at 1, the lit side shows the material's base colour and the shade side its shade colour. The engine hands shaders a directional light as pre-exposed lux over pi, so at the engine's default exposure (EV100 15) the stage's sun is 1.2 × 2^15 × π ≈ 123,533 lux, which reaches the shader at 1. The ambient (`ambient_intensity`) has no pi: 19,661 at EV100 15 is 0.5 of its colour.
 
-WebGPU allows 16 textures per shader stage, and the shadows, sky light and fog take 7, which leaves 9 of `mtoon.glsl`'s 14 maps. A material leaves out the maps it never sets with `MTOON_NO_<MAP>` keywords (FoxGlove's materials in `assets/foxglove/materials/` do). On the web those maps aren't bound and read as their defaults, as unset maps do on the desktop, so both builds draw the same. A material with more than 9 maps, like one the VRM importer makes, still draws on the web, without sky light and fog. The desktop build binds every map whatever the keywords say.
+WebGPU allows 16 textures per shader stage, and the shadows, sky light and fog take 7, which leaves 9 of `mtoon.glsl`'s 14 maps. A material leaves out the maps it never sets with `MTOON_NO_<MAP>` keywords. On the web those maps aren't bound and read as their defaults, as unset maps do on the desktop, so both builds draw the same. A material with more than 9 maps, like one the VRM importer makes, still draws on the web, without sky light and fog. The desktop build binds every map whatever the keywords say.
+
+FoxGlove's keywords are listed per material under `material_override` in `assets/foxglove/foxglove.import.hzt`. The cook writes her material files in `assets/foxglove/materials/` from the glb each time, so keywords set in them would be lost; once one of those files has been edited, the cook stops with an error rather than overwrite it.
 
 ## Loading a VRM
 

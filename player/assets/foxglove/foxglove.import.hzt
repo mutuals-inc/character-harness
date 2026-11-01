@@ -4,6 +4,558 @@ version 17
 rig_mode ""
 import_scale 1.000000
 shader_override 0
+material_override 16
+  material "BodySkin_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Boots_MAT_skinned"
+  keywords 10
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "ExtraGeo_AngryMouth_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "ExtraGeo_HappyMouth_MAT_skinned"
+  keywords 12
+    name "MTOON_NO_SHADE_MAP"
+    value ""
+
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "EyeLashes_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Eye_MAT_skinned"
+  keywords 9
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Facial_MAT_skinned"
+  keywords 8
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Hair_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Heart_Mat_skinned"
+  keywords 12
+    name "MTOON_NO_SHADE_MAP"
+    value ""
+
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "NovaSaia_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "PulseVein_Mat_skinned"
+  keywords 12
+    name "MTOON_NO_SHADE_MAP"
+    value ""
+
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Shirt_MAT_skinned"
+  keywords 10
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Skirt_MAT_skinned"
+  keywords 11
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Sleeves_MAT_skinned"
+  keywords 10
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "Stars_Mat_1_skinned"
+  keywords 12
+    name "MTOON_NO_SHADE_MAP"
+    value ""
+
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
+  material "standardSurface1_skinned"
+  keywords 12
+    name "MTOON_NO_SHADE_MAP"
+    value ""
+
+    name "MTOON_NO_EMISSIVE_MAP"
+    value ""
+
+    name "MTOON_NO_MATCAP_MAP"
+    value ""
+
+    name "MTOON_NO_RIM_MAP"
+    value ""
+
+    name "MTOON_NO_SHADING_SHIFT_MAP"
+    value ""
+
+    name "MTOON_NO_FACE_MASK_MAP"
+    value ""
+
+    name "MTOON_NO_HIGHLIGHT_MAP"
+    value ""
+
+    name "MTOON_NO_BLUSH_MASK"
+    value ""
+
+    name "MTOON_NO_NERVOUS_MASK"
+    value ""
+
+    name "MTOON_NO_STAR_EYES_MASK"
+    value ""
+
+    name "MTOON_NO_TEARY_NOISE"
+    value ""
+
+    name "MTOON_NO_TEARY_MASK"
+    value ""
+  quality_drops 0
 pass_override 10
   material "BodySkin_MAT_skinned"
   passes 1

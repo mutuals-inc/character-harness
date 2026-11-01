@@ -1,5 +1,6 @@
 type MaterialBlobAsset
 version 23
+generated a3144d2a2e0a0595
 ---
 shader_source "/shaders/mutuals/mtoon.glsl" ShaderVariantBlobAsset
 depth_test true
@@ -9,6 +10,7 @@ cull_mode GPU_CULL_BACK
 is_transparent false
 alpha_cutoff false
 alpha_to_coverage false
+lod_fade false
 blend
   enabled false
   src_factor GPU_BLEND_ZERO
@@ -207,3 +209,4 @@ passes 1
     dst_factor_alpha GPU_BLEND_ZERO
     op_alpha GPU_BLEND_OP_ADD
   keywords 0
+quality_drops 0

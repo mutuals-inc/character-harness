@@ -13,7 +13,7 @@ your own build (`player/README.md`).
 
 - Node.js 24 or later, npm, and this repository checked out locally.
 - A licensed Kaigen SDK for your operating system and CPU architecture, with the
-  version pinned in `player/hzproject.hzt`: currently `0.6.3.001`.
+  version pinned in `player/hzproject.hzt`: currently `0.6.4.002`.
 - The SDK linked as `player/hz`. SDK binaries and licences are not committed.
 - A working native compiler: the Kaigen Windows toolchain, or Xcode Command Line
   Tools on macOS (`xcode-select --install` if they are missing).

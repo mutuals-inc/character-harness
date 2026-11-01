@@ -60,6 +60,31 @@ test("the web toon shader has room for the sky light and fog on every FoxGlove m
 	}
 });
 
+// The cook writes the material files from the glb every time, adding the
+// keywords foxglove.import.hzt lists for each material: keywords written in a
+// material file alone would be lost on the next cook.
+test("FoxGlove's material keywords come from her import settings", () => {
+	const sidecar = read("assets/foxglove/foxglove.import.hzt");
+	const overrides = new Map<string, string[]>();
+	const section = sidecar.slice(sidecar.indexOf("\nmaterial_override "), sidecar.indexOf("\npass_override "));
+	for (const entry of section.split(/^ {2}material /m).slice(1)) {
+		const name = /^"(\w+)"/.exec(entry)![1];
+		const keywords = [...entry.matchAll(/^ {4}name "(\w+)"$/gm)].map((m) => m[1]);
+		assert.equal(keywords.length, Number(/^ {2}keywords (\d+)$/m.exec(entry)![1]), `${name}: keyword count`);
+		overrides.set(name, keywords);
+	}
+	const dir = "assets/foxglove/materials";
+	const files = readdirSync(path.join(player, dir)).filter((f) => f.endsWith("_skinned_mat.hzt"));
+	// a material renamed in the glb gets a new file, and its old entry would no longer apply
+	assert.deepEqual([...overrides.keys()].sort(), files.map((f) => f.slice(0, -"_skinned_mat.hzt".length)).sort());
+	for (const file of files) {
+		const hzt = read(`${dir}/${file}`);
+		const block = /^keywords \d+\n((?: {2}.*\n|\n)*?)(?=^\S)/m.exec(hzt)![1];
+		const keywords = [...block.matchAll(/^ {2}name "(\w+)"$/gm)].map((m) => m[1]);
+		assert.deepEqual(keywords, overrides.get(file.slice(0, -"_skinned_mat.hzt".length)), `${file}: keywords`);
+	}
+});
+
 test("the web outline shader fits the sky light and fog without leaving maps out", () => {
 	const glsl = read("shaders/mutuals/mtoon_outline.glsl");
 	assert.match(glsl, /^#define HZ_RENDERER_IBL\n#define HZ_RENDERER_FOG$/m);
