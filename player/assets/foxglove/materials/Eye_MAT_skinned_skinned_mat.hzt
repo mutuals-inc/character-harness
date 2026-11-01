@@ -1,5 +1,6 @@
 type MaterialBlobAsset
 version 23
+generated 81cfc9acabd532e4
 ---
 shader_source "/shaders/mutuals/mtoon.glsl" ShaderVariantBlobAsset
 depth_test true
@@ -9,6 +10,7 @@ cull_mode GPU_CULL_BACK
 is_transparent false
 alpha_cutoff true
 alpha_to_coverage false
+lod_fade false
 blend
   enabled false
   src_factor GPU_BLEND_ZERO
@@ -191,3 +193,4 @@ keywords 9
   name "MTOON_NO_TEARY_MASK"
   value ""
 passes 0
+quality_drops 0
